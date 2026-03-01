@@ -6,6 +6,10 @@ RUST_TARGET=x86_64-unknown-uefi
 RUST_PROFILE=release
 EFI_BIN=target/$(RUST_TARGET)/$(RUST_PROFILE)/bang.efi
 
+ROOTFS_DIR=rootfs
+ROOTFS_IMG=rootfs.img
+ROOTFS_SIZE_KB=33792
+
 build:
 	cargo build --release
 	cp $(EFI_BIN) BOOTX64.EFI
@@ -22,8 +26,21 @@ image: build
 		for f in drivers/*; do mcopy -i fat.img "$$f" ::/drivers/; done; \
 	fi
 
-hd: image
-	mkgpt -o hdimage.bin --image-size 4096 --part fat.img --type system
+$(ROOTFS_IMG): FORCE
+	dd if=/dev/zero of=$(ROOTFS_IMG) bs=1k count=$(ROOTFS_SIZE_KB)
+	mformat -i $(ROOTFS_IMG) -F ::
+	@cd $(ROOTFS_DIR) && \
+	find . -mindepth 1 -type d | sort | while read d; do \
+		mmd -i ../$(ROOTFS_IMG) "::$$d" 2>/dev/null || true; \
+	done; \
+	find . -type f ! -name '.gitkeep' | while read f; do \
+		mcopy -i ../$(ROOTFS_IMG) "$$f" "::$$f"; \
+	done
+
+hd: image $(ROOTFS_IMG)
+	mkgpt -o hdimage.bin --image-size 131072 \
+		--part fat.img --type system \
+		--part $(ROOTFS_IMG) --type linux
 
 cd: image
 	mkdir -p iso
@@ -37,7 +54,7 @@ run-iso: cd
 	sudo qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -cdrom cdimage.iso
 
 clean:
-	rm -f BOOTX64.EFI fat.img hdimage.bin cdimage.iso
+	rm -f BOOTX64.EFI fat.img $(ROOTFS_IMG) hdimage.bin cdimage.iso
 	cargo clean
 
 # Build quark kernel and drivers, then copy artifacts here
@@ -48,4 +65,6 @@ sync-quark:
 	cp $(QUARK_DIR)/drivers/vga/vga.drv drivers/
 	cp $(QUARK_DIR)/drivers/fat32/fat32.drv drivers/
 
-.PHONY: build image hd cd run run-iso clean sync-quark
+.PHONY: build image hd cd run run-iso clean sync-quark FORCE
+
+FORCE:
