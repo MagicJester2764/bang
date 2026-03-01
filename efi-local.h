@@ -33,8 +33,9 @@ typedef struct {
 #pragma pack()
 
 /* Multiboot2 constants */
-#define MB2_TAG_TYPE_END   0
-#define MB2_TAG_TYPE_MMAP  6
+#define MB2_TAG_TYPE_END          0
+#define MB2_TAG_TYPE_MMAP         6
+#define MB2_TAG_TYPE_FRAMEBUFFER  8
 
 /* Multiboot2 memory map entry */
 #pragma pack(1)
@@ -50,6 +51,22 @@ typedef struct {
     UINT32 type;
     UINT32 size;
 } mb2_tag_header;
+
+/* Framebuffer info passed from GOP query to MB2 builder */
+typedef struct {
+    UINT64 addr;
+    UINT32 pitch;
+    UINT32 width;
+    UINT32 height;
+    UINT8  bpp;
+    UINT8  type;       /* 1 = indexed, 2 = RGB */
+    UINT8  red_pos;
+    UINT8  red_size;
+    UINT8  green_pos;
+    UINT8  green_size;
+    UINT8  blue_pos;
+    UINT8  blue_size;
+} fb_info;
 #pragma pack()
 
 EFI_STATUS EFIAPI efi_init(EFI_SYSTEM_TABLE *systable);
@@ -74,6 +91,12 @@ EFI_STATUS EFIAPI efi_get_memory_map(
 );
 
 EFI_STATUS EFIAPI efi_exit_boot_services(EFI_HANDLE image, UINTN mapkey);
+
+/*
+ * efi_query_gop - Query the Graphics Output Protocol for framebuffer info.
+ * Must be called before ExitBootServices.
+ */
+EFI_STATUS EFIAPI efi_query_gop(fb_info *fb);
 
 /*
  * efi_build_multiboot_info - Build Multiboot1 boot information from the
@@ -112,7 +135,8 @@ UINT32 efi_build_multiboot2_info(
     UINTN buf_size,
     EFI_MEMORY_DESCRIPTOR *efi_map,
     UINTN efi_map_size,
-    UINTN desc_size
+    UINTN desc_size,
+    fb_info *fb
 );
 
 #endif /* _EFI_LOCAL_H_ */

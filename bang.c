@@ -39,6 +39,15 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
         return status;
     }
 
+    /* Query GOP for framebuffer info (must be done before ExitBootServices) */
+    fb_info fb;
+    fb_info *fb_ptr = NULL;
+    if (mb_version == 2) {
+        status = efi_query_gop(&fb);
+        if (!EFI_ERROR(status))
+            fb_ptr = &fb;
+    }
+
     /* Get memory map (must be done right before ExitBootServices) */
     con_print(L"[+] Getting memory map...\r\n");
     status = efi_get_memory_map(&efi_map, &map_size, &map_key,
@@ -59,7 +68,8 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
         magic = MB1_BOOT_MAGIC;
     } else {
         efi_build_multiboot2_info(mb2_info, sizeof(mb2_info),
-                                   efi_map, map_size, desc_size);
+                                   efi_map, map_size, desc_size,
+                                   fb_ptr);
         mbi_addr = (UINT32)(UINTN)mb2_info;
         magic = MB2_BOOT_MAGIC;
     }
@@ -81,7 +91,8 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
                                       efi_map, map_size, desc_size);
         } else {
             efi_build_multiboot2_info(mb2_info, sizeof(mb2_info),
-                                       efi_map, map_size, desc_size);
+                                       efi_map, map_size, desc_size,
+                                       fb_ptr);
         }
 
         status = efi_exit_boot_services(image, map_key);

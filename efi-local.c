@@ -48,6 +48,60 @@ efi_exit_boot_services(EFI_HANDLE image, UINTN mapkey) {
     return ST->BootServices->ExitBootServices(image, mapkey);
 }
 
+EFI_STATUS EFIAPI
+efi_query_gop(fb_info *fb) {
+    EFI_STATUS status;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
+
+    status = BS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL,
+                                (void **)&gop);
+    if (EFI_ERROR(status))
+        return status;
+
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = gop->Mode->Info;
+
+    fb->addr   = gop->Mode->FrameBufferBase;
+    fb->width  = info->HorizontalResolution;
+    fb->height = info->VerticalResolution;
+
+    switch (info->PixelFormat) {
+    case PixelRedGreenBlueReserved8BitPerColor:
+        fb->bpp       = 32;
+        fb->type      = 1;
+        fb->red_pos   = 0;
+        fb->red_size  = 8;
+        fb->green_pos = 8;
+        fb->green_size = 8;
+        fb->blue_pos  = 16;
+        fb->blue_size = 8;
+        break;
+    case PixelBlueGreenRedReserved8BitPerColor:
+        fb->bpp       = 32;
+        fb->type      = 1;
+        fb->red_pos   = 16;
+        fb->red_size  = 8;
+        fb->green_pos = 8;
+        fb->green_size = 8;
+        fb->blue_pos  = 0;
+        fb->blue_size = 8;
+        break;
+    default:
+        fb->bpp       = 32;
+        fb->type      = 1;
+        fb->red_pos   = 0;
+        fb->red_size  = 8;
+        fb->green_pos = 8;
+        fb->green_size = 8;
+        fb->blue_pos  = 16;
+        fb->blue_size = 8;
+        break;
+    }
+
+    fb->pitch = info->PixelsPerScanLine * (fb->bpp / 8);
+
+    return EFI_SUCCESS;
+}
+
 static UINT32
 efi_memtype_to_mb(UINT32 efi_type) {
     switch (efi_type) {
@@ -144,7 +198,8 @@ efi_build_multiboot2_info(
     UINTN buf_size,
     EFI_MEMORY_DESCRIPTOR *efi_map,
     UINTN efi_map_size,
-    UINTN desc_size)
+    UINTN desc_size,
+    fb_info *fb)
 {
     UINTN num_entries = efi_map_size / desc_size;
     UINT8 *out = (UINT8 *)buf;
@@ -196,6 +251,52 @@ efi_build_multiboot2_info(
 
     /* Align to 8 bytes */
     pos = (pos + 7) & ~(UINTN)7;
+
+    /* Framebuffer tag (type=8) if GOP info is available */
+    if (fb) {
+        /*
+         * MB2 framebuffer tag layout:
+         *   +0x00: u32 type (8)
+         *   +0x04: u32 size
+         *   +0x08: u64 framebuffer_addr
+         *   +0x10: u32 framebuffer_pitch
+         *   +0x14: u32 framebuffer_width
+         *   +0x18: u32 framebuffer_height
+         *   +0x1C: u8  framebuffer_bpp
+         *   +0x1D: u8  framebuffer_type (1 = RGB direct color)
+         *   +0x1E: u8  reserved
+         *   -- color info for type 1 (RGB) --
+         *   +0x1F: u8  red_field_position
+         *   +0x20: u8  red_mask_size
+         *   +0x21: u8  green_field_position
+         *   +0x22: u8  green_mask_size
+         *   +0x23: u8  blue_field_position
+         *   +0x24: u8  blue_mask_size
+         *   Total: 0x25 = 37 bytes
+         */
+        UINTN fb_tag_size = 37;
+        if (pos + fb_tag_size <= buf_size) {
+            *(UINT32 *)(out + pos + 0x00) = MB2_TAG_TYPE_FRAMEBUFFER;
+            *(UINT32 *)(out + pos + 0x04) = (UINT32)fb_tag_size;
+            *(UINT64 *)(out + pos + 0x08) = fb->addr;
+            *(UINT32 *)(out + pos + 0x10) = fb->pitch;
+            *(UINT32 *)(out + pos + 0x14) = fb->width;
+            *(UINT32 *)(out + pos + 0x18) = fb->height;
+            *(UINT8  *)(out + pos + 0x1C) = fb->bpp;
+            *(UINT8  *)(out + pos + 0x1D) = fb->type;
+            *(UINT8  *)(out + pos + 0x1E) = 0;
+            *(UINT8  *)(out + pos + 0x1F) = fb->red_pos;
+            *(UINT8  *)(out + pos + 0x20) = fb->red_size;
+            *(UINT8  *)(out + pos + 0x21) = fb->green_pos;
+            *(UINT8  *)(out + pos + 0x22) = fb->green_size;
+            *(UINT8  *)(out + pos + 0x23) = fb->blue_pos;
+            *(UINT8  *)(out + pos + 0x24) = fb->blue_size;
+            pos += fb_tag_size;
+        }
+
+        /* Align to 8 bytes */
+        pos = (pos + 7) & ~(UINTN)7;
+    }
 
     /* Terminating tag (type=0, size=8) */
     if (pos + 8 > buf_size)
