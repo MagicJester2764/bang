@@ -46,5 +46,6 @@ sync-quark:
 	cp $(QUARK_DIR)/kernel.bin $(KERNEL)
 	mkdir -p drivers
 	cp $(QUARK_DIR)/drivers/vga/vga.drv drivers/
+	cp $(QUARK_DIR)/drivers/fat32/fat32.drv drivers/
 
 .PHONY: build image hd cd run run-iso clean sync-quark
