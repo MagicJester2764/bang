@@ -3,10 +3,10 @@ KERNEL=kernel.bin
 
 RUST_TARGET=x86_64-unknown-uefi
 RUST_PROFILE=release
-EFI_BIN=rust/target/$(RUST_TARGET)/$(RUST_PROFILE)/bang.efi
+EFI_BIN=target/$(RUST_TARGET)/$(RUST_PROFILE)/bang.efi
 
 build:
-	cd rust && cargo build --release
+	cargo build --release
 	cp $(EFI_BIN) BOOTX64.EFI
 
 image: build
@@ -33,6 +33,6 @@ run-iso: cd
 
 clean:
 	rm -f BOOTX64.EFI fat.img hdimage.bin cdimage.iso
-	cd rust && cargo clean
+	cargo clean
 
 .PHONY: build image hd cd run run-iso clean
