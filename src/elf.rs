@@ -132,25 +132,60 @@ fn detect_multiboot_version(file_buf: &[u8]) -> u32 {
     0
 }
 
+/// Track pages already allocated for kernel segments to avoid double-allocation
+/// when adjacent ELF segments share pages.
+static mut ALLOC_PAGES: [(u64, usize); 32] = [(0, 0); 32];
+static mut ALLOC_COUNT: usize = 0;
+
+/// Check if the page range [base_page .. base_page + num_pages) is already allocated.
+/// Returns true if fully covered (no allocation needed).
+unsafe fn pages_already_allocated(base_page: u64, num_pages: usize) -> bool {
+    for i in 0..ALLOC_COUNT {
+        let (alloc_base, alloc_pages) = ALLOC_PAGES[i];
+        let alloc_end = alloc_base + (alloc_pages as u64) * 4096;
+        if base_page >= alloc_base && base_page + (num_pages as u64) * 4096 <= alloc_end {
+            return true;
+        }
+    }
+    false
+}
+
+/// Record that pages [base .. base + num_pages * 4096) have been allocated.
+unsafe fn record_allocation(base: u64, num_pages: usize) {
+    if ALLOC_COUNT < 32 {
+        ALLOC_PAGES[ALLOC_COUNT] = (base, num_pages);
+        ALLOC_COUNT += 1;
+    }
+}
+
 /// Load a PT_LOAD segment: allocate pages at physical address and copy data.
+/// Handles non-page-aligned paddr and overlapping segments.
 fn load_segment(paddr: u64, memsz: u64, file_buf: &[u8], offset: u64, filesz: u64) {
-    let num_pages = ((memsz + 4095) / 4096) as usize;
-    let seg_addr = boot::allocate_pages(
-        boot::AllocateType::Address(paddr),
-        MemoryType::LOADER_DATA,
-        num_pages,
-    )
-    .expect("Failed to allocate pages for segment");
+    let page_base = paddr & !0xFFF;
+    let page_offset = (paddr - page_base) as usize;
+    let total_size = page_offset as u64 + memsz;
+    let num_pages = ((total_size + 4095) / 4096) as usize;
 
     unsafe {
+        if !pages_already_allocated(page_base, num_pages) {
+            boot::allocate_pages(
+                boot::AllocateType::Address(page_base),
+                MemoryType::LOADER_DATA,
+                num_pages,
+            )
+            .expect("Failed to allocate pages for segment");
+            record_allocation(page_base, num_pages);
+        }
+
+        let dest = paddr as *mut u8;
         ptr::copy_nonoverlapping(
             file_buf.as_ptr().add(offset as usize),
-            seg_addr.as_ptr(),
+            dest,
             filesz as usize,
         );
         if memsz > filesz {
             ptr::write_bytes(
-                seg_addr.as_ptr().add(filesz as usize),
+                dest.add(filesz as usize),
                 0,
                 (memsz - filesz) as usize,
             );

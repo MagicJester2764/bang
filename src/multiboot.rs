@@ -1,15 +1,21 @@
 use uefi::mem::memory_map::{MemoryMap, MemoryMapOwned, MemoryType};
 
 use crate::gop::FbInfo;
+use crate::modules::ModuleInfo;
 
 // Multiboot1 constants
 const MB_INFO_MEMORY: u32 = 0x0000_0001;
+const MB_INFO_MODS: u32 = 0x0000_0008;
 const MB_INFO_MEM_MAP: u32 = 0x0000_0040;
 
 // Multiboot2 tag types
 const MB2_TAG_TYPE_END: u32 = 0;
+const MB2_TAG_TYPE_MODULE: u32 = 3;
 const MB2_TAG_TYPE_MMAP: u32 = 6;
 const MB2_TAG_TYPE_FRAMEBUFFER: u32 = 8;
+
+/// Maximum number of modules supported.
+const MAX_MODULES: usize = 32;
 
 /// Static buffer for Multiboot1 info — must survive ExitBootServices.
 static mut MB1_INFO: MultibootInfo = MultibootInfo {
@@ -33,11 +39,28 @@ static mut MB1_MMAP: [MultibootMmapEntry; 256] = [MultibootMmapEntry {
     entry_type: 0,
 }; 256];
 
-/// Static buffer for Multiboot2 boot info (4096 bytes, 8-byte aligned).
+/// Static buffer for Multiboot2 boot info (8192 bytes, 8-byte aligned).
 #[repr(align(8))]
-struct Mb2Buffer([u8; 4096]);
+struct Mb2Buffer([u8; 8192]);
 
-static mut MB2_INFO: Mb2Buffer = Mb2Buffer([0u8; 4096]);
+static mut MB2_INFO: Mb2Buffer = Mb2Buffer([0u8; 8192]);
+
+/// Static buffer for Multiboot1 module entries (16 bytes each).
+#[repr(C, packed)]
+#[derive(Clone, Copy)]
+struct MultibootModule {
+    mod_start: u32,
+    mod_end: u32,
+    string: u32,
+    reserved: u32,
+}
+
+static mut MB1_MODULES: [MultibootModule; MAX_MODULES] = [MultibootModule {
+    mod_start: 0,
+    mod_end: 0,
+    string: 0,
+    reserved: 0,
+}; MAX_MODULES];
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -91,9 +114,10 @@ fn efi_memtype_to_mb(efi_type: MemoryType) -> u32 {
 ///
 /// # Safety
 /// Must be called after `exit_boot_services` — writes into static buffers.
-pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned) -> u32 {
+pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned, modules: &[ModuleInfo]) -> u32 {
     let mbi = &raw mut MB1_INFO;
     let mmap = &raw mut MB1_MMAP;
+    let mods = &raw mut MB1_MODULES;
 
     // Zero the structures
     core::ptr::write_bytes(mbi, 0, 1);
@@ -132,9 +156,30 @@ pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned) -> u32 {
         mem_lower = 640;
     }
 
-    (*mbi).flags = MB_INFO_MEMORY | MB_INFO_MEM_MAP;
+    let mut flags = MB_INFO_MEMORY | MB_INFO_MEM_MAP;
+
+    // Populate module entries
+    let mod_count = modules.len().min(MAX_MODULES);
+    if mod_count > 0 {
+        for i in 0..mod_count {
+            let m = &modules[i];
+            (*mods)[i].mod_start = m.phys_start as u32;
+            (*mods)[i].mod_end = (m.phys_start + m.size) as u32;
+            (*mods)[i].string = m.name_ptr;
+            (*mods)[i].reserved = 0;
+        }
+        flags |= MB_INFO_MODS;
+    }
+
+    (*mbi).flags = flags;
     (*mbi).mem_lower = mem_lower as u32;
     (*mbi).mem_upper = mem_upper as u32;
+    (*mbi).mods_count = mod_count as u32;
+    (*mbi).mods_addr = if mod_count > 0 {
+        (*mods).as_ptr() as u32
+    } else {
+        0
+    };
     (*mbi).mmap_length = (mmap_count * core::mem::size_of::<MultibootMmapEntry>()) as u32;
     (*mbi).mmap_addr = (*mmap).as_ptr() as u32;
 
@@ -146,10 +191,14 @@ pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned) -> u32 {
 ///
 /// # Safety
 /// Must be called after `exit_boot_services` — writes into static buffers.
-pub unsafe fn build_mb2_info(memory_map: &MemoryMapOwned, fb: Option<&FbInfo>) -> u32 {
+pub unsafe fn build_mb2_info(
+    memory_map: &MemoryMapOwned,
+    fb: Option<&FbInfo>,
+    modules: &[ModuleInfo],
+) -> u32 {
     let buf = &raw mut MB2_INFO;
     let out = (*buf).0.as_mut_ptr();
-    let buf_size = 4096usize;
+    let buf_size = 8192usize;
 
     core::ptr::write_bytes(out, 0, buf_size);
 
@@ -192,6 +241,33 @@ pub unsafe fn build_mb2_info(memory_map: &MemoryMapOwned, fb: Option<&FbInfo>) -
 
     // Align to 8 bytes
     pos = (pos + 7) & !7;
+
+    // Module tags (type=3) — one per loaded module
+    for m in modules {
+        // Compute name length from the null-terminated string at name_ptr
+        let name_addr = m.name_ptr as *const u8;
+        let mut name_len: usize = 0;
+        while *name_addr.add(name_len) != 0 {
+            name_len += 1;
+        }
+        // Tag: type(4) + size(4) + mod_start(4) + mod_end(4) + string(name_len+1)
+        let tag_size = 4 + 4 + 4 + 4 + name_len + 1;
+        if pos + tag_size > buf_size {
+            break;
+        }
+
+        write_u32(out, pos, MB2_TAG_TYPE_MODULE);
+        write_u32(out, pos + 4, tag_size as u32);
+        write_u32(out, pos + 8, m.phys_start as u32);
+        write_u32(out, pos + 12, (m.phys_start + m.size) as u32);
+
+        // Copy name string (including null terminator)
+        core::ptr::copy_nonoverlapping(name_addr, out.add(pos + 16), name_len + 1);
+
+        pos += tag_size;
+        // Align to 8 bytes
+        pos = (pos + 7) & !7;
+    }
 
     // Framebuffer tag (type=8) if GOP info is available
     if let Some(fb) = fb {

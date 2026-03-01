@@ -11,6 +11,7 @@ mod console;
 mod elf;
 mod gop;
 mod handoff;
+mod modules;
 mod multiboot;
 mod trampoline;
 
@@ -39,6 +40,9 @@ fn main() -> Status {
         kernel.entry_point, kernel.mb_version, kernel.boot_mode
     );
 
+    // Load boot modules from \drivers\ directory (must be before ExitBootServices)
+    let mods = modules::load_modules();
+
     // Query GOP for framebuffer info (must be before ExitBootServices)
     let fb = if kernel.mb_version == 2 {
         gop::query_gop()
@@ -55,10 +59,11 @@ fn main() -> Status {
     match kernel.boot_mode {
         BootMode::Protected32 => {
             let (mbi_addr, magic) = if kernel.mb_version == 1 {
-                let addr = unsafe { multiboot::build_mb1_info(&memory_map) };
+                let addr = unsafe { multiboot::build_mb1_info(&memory_map, &mods) };
                 (addr, MB1_BOOT_MAGIC)
             } else {
-                let addr = unsafe { multiboot::build_mb2_info(&memory_map, fb.as_ref()) };
+                let addr =
+                    unsafe { multiboot::build_mb2_info(&memory_map, fb.as_ref(), &mods) };
                 (addr, MB2_BOOT_MAGIC)
             };
 
@@ -73,7 +78,7 @@ fn main() -> Status {
         BootMode::Long64 => {
             // 64-bit direct handoff — pass MB2 info if available, otherwise 0
             let boot_info_ptr = if kernel.mb_version == 2 {
-                unsafe { multiboot::build_mb2_info(&memory_map, fb.as_ref()) as u64 }
+                unsafe { multiboot::build_mb2_info(&memory_map, fb.as_ref(), &mods) as u64 }
             } else {
                 0u64
             };

@@ -16,6 +16,10 @@ image: build
 	mmd -i fat.img ::/EFI/BOOT
 	mcopy -i fat.img BOOTX64.EFI ::/EFI/BOOT
 	mcopy -i fat.img $(KERNEL) ::/kernel.bin
+	mmd -i fat.img ::/drivers
+	@if [ -d drivers ] && [ "$$(ls -A drivers 2>/dev/null)" ]; then \
+		for f in drivers/*; do mcopy -i fat.img "$$f" ::/drivers/; done; \
+	fi
 
 hd: image
 	mkgpt -o hdimage.bin --image-size 4096 --part fat.img --type system
