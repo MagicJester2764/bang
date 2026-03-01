@@ -1,11 +1,12 @@
 #include "fs.h"
 #include "con.h"
 
-/* ELF32 types and structures */
-#define EI_NIDENT 16
-#define ET_EXEC   2
-#define EM_386    3
-#define PT_LOAD   1
+/* ELF64 types and structures */
+#define EI_NIDENT  16
+#define ET_EXEC    2
+#define EM_X86_64  62
+#define PT_LOAD    1
+#define ELFCLASS64 2
 
 #define ELFMAG0 0x7f
 #define ELFMAG1 'E'
@@ -18,9 +19,9 @@ typedef struct {
     UINT16 e_type;
     UINT16 e_machine;
     UINT32 e_version;
-    UINT32 e_entry;
-    UINT32 e_phoff;
-    UINT32 e_shoff;
+    UINT64 e_entry;
+    UINT64 e_phoff;
+    UINT64 e_shoff;
     UINT32 e_flags;
     UINT16 e_ehsize;
     UINT16 e_phentsize;
@@ -28,18 +29,18 @@ typedef struct {
     UINT16 e_shentsize;
     UINT16 e_shnum;
     UINT16 e_shstrndx;
-} Elf32_Ehdr;
+} Elf64_Ehdr;
 
 typedef struct {
     UINT32 p_type;
-    UINT32 p_offset;
-    UINT32 p_vaddr;
-    UINT32 p_paddr;
-    UINT32 p_filesz;
-    UINT32 p_memsz;
     UINT32 p_flags;
-    UINT32 p_align;
-} Elf32_Phdr;
+    UINT64 p_offset;
+    UINT64 p_vaddr;
+    UINT64 p_paddr;
+    UINT64 p_filesz;
+    UINT64 p_memsz;
+    UINT64 p_align;
+} Elf64_Phdr;
 #pragma pack()
 
 static void
@@ -130,8 +131,8 @@ fs_load_kernel(EFI_HANDLE image, UINT32 *entry_point) {
         goto close_files;
     }
 
-    /* Parse ELF32 header */
-    Elf32_Ehdr *ehdr = (Elf32_Ehdr *)file_buf;
+    /* Parse ELF64 header */
+    Elf64_Ehdr *ehdr = (Elf64_Ehdr *)file_buf;
 
     if (ehdr->e_ident[0] != ELFMAG0 || ehdr->e_ident[1] != ELFMAG1 ||
         ehdr->e_ident[2] != ELFMAG2 || ehdr->e_ident[3] != ELFMAG3) {
@@ -141,24 +142,31 @@ fs_load_kernel(EFI_HANDLE image, UINT32 *entry_point) {
         goto close_files;
     }
 
-    if (ehdr->e_type != ET_EXEC || ehdr->e_machine != EM_386) {
-        con_print(L"[-] Not an i386 ELF executable.\r\n");
+    if (ehdr->e_ident[4] != ELFCLASS64) {
+        con_print(L"[-] Not an ELF64 file.\r\n");
         BS->FreePool(file_buf);
         status = EFI_LOAD_ERROR;
         goto close_files;
     }
 
-    con_print(L"[+] Valid ELF32 i386 executable.\r\n");
+    if (ehdr->e_type != ET_EXEC || ehdr->e_machine != EM_X86_64) {
+        con_print(L"[-] Not an x86_64 ELF executable.\r\n");
+        BS->FreePool(file_buf);
+        status = EFI_LOAD_ERROR;
+        goto close_files;
+    }
+
+    con_print(L"[+] Valid ELF64 x86_64 executable.\r\n");
 
     /* Load PT_LOAD segments */
-    Elf32_Phdr *phdr = (Elf32_Phdr *)(file_buf + ehdr->e_phoff);
+    Elf64_Phdr *phdr = (Elf64_Phdr *)(file_buf + ehdr->e_phoff);
 
     for (UINT16 i = 0; i < ehdr->e_phnum; i++) {
         if (phdr[i].p_type != PT_LOAD)
             continue;
 
         /* Allocate pages at the segment's physical address */
-        UINTN num_pages = (phdr[i].p_memsz + 4095) / 4096;
+        UINTN num_pages = (UINTN)((phdr[i].p_memsz + 4095) / 4096);
         EFI_PHYSICAL_ADDRESS seg_addr = phdr[i].p_paddr;
 
         status = BS->AllocatePages(AllocateAddress, EfiLoaderData,
@@ -172,17 +180,17 @@ fs_load_kernel(EFI_HANDLE image, UINT32 *entry_point) {
         /* Copy segment data */
         mem_copy((void *)(UINTN)seg_addr,
                  file_buf + phdr[i].p_offset,
-                 phdr[i].p_filesz);
+                 (UINTN)phdr[i].p_filesz);
 
         /* Zero BSS (memsz > filesz) */
         if (phdr[i].p_memsz > phdr[i].p_filesz) {
             mem_set((void *)(UINTN)(seg_addr + phdr[i].p_filesz),
                     0,
-                    phdr[i].p_memsz - phdr[i].p_filesz);
+                    (UINTN)(phdr[i].p_memsz - phdr[i].p_filesz));
         }
     }
 
-    *entry_point = ehdr->e_entry;
+    *entry_point = (UINT32)ehdr->e_entry;
     con_print(L"[+] Kernel loaded successfully.\r\n");
 
     BS->FreePool(file_buf);

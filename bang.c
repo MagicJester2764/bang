@@ -5,9 +5,8 @@
 /* Assembly trampoline: drops to 32-bit protected mode and jumps to kernel */
 extern void boot_jump_to_kernel(UINT32 entry, UINT32 mbi_addr);
 
-/* Static storage for multiboot info — must survive ExitBootServices */
-static multiboot_info mbi;
-static multiboot_mmap_entry mmap_entries[256];
+/* Static buffer for Multiboot2 boot info — must survive ExitBootServices */
+static __attribute__((aligned(8))) UINT8 mb2_info[4096];
 
 EFI_STATUS EFIAPI
 efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
@@ -40,9 +39,9 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
         return status;
     }
 
-    /* Build multiboot info from EFI memory map */
-    efi_build_multiboot_info(&mbi, mmap_entries, sizeof(mmap_entries),
-                              efi_map, map_size, desc_size);
+    /* Build Multiboot2 boot info from EFI memory map */
+    efi_build_multiboot2_info(mb2_info, sizeof(mb2_info),
+                               efi_map, map_size, desc_size);
 
     /* Exit boot services — no more EFI calls after this!
      * We must NOT call con_print or any BS function past this point.
@@ -56,8 +55,8 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
         if (EFI_ERROR(status))
             return status;
 
-        efi_build_multiboot_info(&mbi, mmap_entries, sizeof(mmap_entries),
-                                  efi_map, map_size, desc_size);
+        efi_build_multiboot2_info(mb2_info, sizeof(mb2_info),
+                                   efi_map, map_size, desc_size);
 
         status = efi_exit_boot_services(image, map_key);
         if (EFI_ERROR(status))
@@ -65,7 +64,7 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
     }
 
     /* Jump to kernel — does not return */
-    boot_jump_to_kernel(entry_point, (UINT32)(UINTN)&mbi);
+    boot_jump_to_kernel(entry_point, (UINT32)(UINTN)mb2_info);
 
     /* Should never reach here */
     for (;;) __asm__ volatile("hlt");

@@ -106,7 +106,7 @@ _pm32:
     mov esp, 0x7C00
 
     ; Set up multiboot registers
-    mov eax, 0x2BADB002     ; Multiboot magic number
+    mov eax, 0x36D76289     ; Multiboot2 magic number
 
     ; Load kernel params from data slots
     mov ebx, dword [TRAMP_ADDR + (_slot_mbi - _tramp_start)]
