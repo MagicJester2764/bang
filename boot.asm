@@ -2,11 +2,12 @@
 ; Assembled with: nasm -f win64 boot.asm -o boot.o
 ;
 ; C prototype:
-;   void boot_jump_to_kernel(uint32_t entry, uint32_t mbi_addr);
+;   void boot_jump_to_kernel(uint32_t entry, uint32_t mbi_addr, uint32_t magic);
 ;
 ; Microsoft x64 calling convention:
 ;   ECX = entry point (32-bit address)
 ;   EDX = multiboot info pointer (32-bit address)
+;   R8D = multiboot magic number
 ;
 ; Strategy: We copy a position-independent trampoline blob to a fixed
 ; low address (0x1000) so that 32-bit far jumps use known absolute
@@ -22,9 +23,10 @@ TRAMP_ADDR equ 0x1000
 boot_jump_to_kernel:
     cli
 
-    ; Save kernel params in r8/r9 (callee-clobbered, but we never return)
-    mov r8d, ecx            ; r8d = kernel entry point
-    mov r9d, edx            ; r9d = multiboot info address
+    ; Save kernel params (callee-clobbered, but we never return)
+    mov r10d, ecx           ; r10d = kernel entry point
+    mov r11d, edx           ; r11d = multiboot info address
+    ; r8d already has magic
 
     ; Copy trampoline blob to TRAMP_ADDR
     lea rsi, [rel _tramp_start]
@@ -33,8 +35,9 @@ boot_jump_to_kernel:
     rep movsb
 
     ; Write kernel params into the blob's data slots at known offsets
-    mov dword [TRAMP_ADDR + (_slot_entry - _tramp_start)], r8d
-    mov dword [TRAMP_ADDR + (_slot_mbi   - _tramp_start)], r9d
+    mov dword [TRAMP_ADDR + (_slot_entry - _tramp_start)], r10d
+    mov dword [TRAMP_ADDR + (_slot_mbi   - _tramp_start)], r11d
+    mov dword [TRAMP_ADDR + (_slot_magic  - _tramp_start)], r8d
 
     ; Fix up GDT base pointer — must write full 8 bytes for 64-bit lgdt
     mov eax, TRAMP_ADDR + (_gdt - _tramp_start)
@@ -106,7 +109,7 @@ _pm32:
     mov esp, 0x7C00
 
     ; Set up multiboot registers
-    mov eax, 0x36D76289     ; Multiboot2 magic number
+    mov eax, dword [TRAMP_ADDR + (_slot_magic - _tramp_start)]
 
     ; Load kernel params from data slots
     mov ebx, dword [TRAMP_ADDR + (_slot_mbi - _tramp_start)]
@@ -122,6 +125,7 @@ _pm32:
 ; ---- Data slots (patched by 64-bit code before jumping here) ----
 _slot_entry: dd 0
 _slot_mbi:   dd 0
+_slot_magic: dd 0
 
 ; ---- GDT ----
 align 16

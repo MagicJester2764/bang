@@ -49,7 +49,7 @@ efi_exit_boot_services(EFI_HANDLE image, UINTN mapkey) {
 }
 
 static UINT32
-efi_memtype_to_mb2(UINT32 efi_type) {
+efi_memtype_to_mb(UINT32 efi_type) {
     switch (efi_type) {
     case EfiConventionalMemory:
     case EfiLoaderCode:
@@ -64,6 +64,71 @@ efi_memtype_to_mb2(UINT32 efi_type) {
     default:
         return 2; /* reserved */
     }
+}
+
+static void
+mb_zero(void *dst, UINTN count) {
+    UINT8 *d = (UINT8 *)dst;
+    for (UINTN i = 0; i < count; i++)
+        d[i] = 0;
+}
+
+void
+efi_build_multiboot_info(
+    multiboot_info *mbi,
+    multiboot_mmap_entry *mmap_entries,
+    UINTN max_entries,
+    EFI_MEMORY_DESCRIPTOR *efi_map,
+    UINTN efi_map_size,
+    UINTN desc_size)
+{
+    UINTN num_efi_entries = efi_map_size / desc_size;
+
+    mb_zero(mbi, sizeof(*mbi));
+
+    UINT64 mem_lower = 0;
+    UINT64 mem_upper = 0;
+    UINTN mmap_count = 0;
+    UINT8 *desc_ptr = (UINT8 *)efi_map;
+
+    for (UINTN i = 0; i < num_efi_entries && mmap_count < max_entries; i++) {
+        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)desc_ptr;
+        UINT64 base = desc->PhysicalStart;
+        UINT64 length = desc->NumberOfPages * 4096ULL;
+        UINT32 type = efi_memtype_to_mb(desc->Type);
+
+        multiboot_mmap_entry *ent = &mmap_entries[mmap_count];
+        ent->size      = sizeof(multiboot_mmap_entry) - 4;
+        ent->base_addr = base;
+        ent->length    = length;
+        ent->type      = type;
+        mmap_count++;
+
+        /* Track conventional memory for mem_lower / mem_upper */
+        if (type == 1) {
+            if (base < 0x100000)
+                mem_lower += length / 1024;
+            else if (base == 0x100000 || (base > 0x100000 && mem_upper > 0))
+                mem_upper += length / 1024;
+        }
+
+        desc_ptr += desc_size;
+    }
+
+    /* Cap at 32-bit limits */
+    if (mem_lower > 640)
+        mem_lower = 640;
+
+    mbi->flags       = MB_INFO_MEMORY | MB_INFO_MEM_MAP;
+    mbi->mem_lower   = (UINT32)mem_lower;
+    mbi->mem_upper   = (UINT32)mem_upper;
+    mbi->mmap_length = (UINT32)(mmap_count * sizeof(multiboot_mmap_entry));
+    mbi->mmap_addr   = (UINT32)(UINTN)mmap_entries;
+}
+
+static UINT32
+efi_memtype_to_mb2(UINT32 efi_type) {
+    return efi_memtype_to_mb(efi_type);
 }
 
 static void
