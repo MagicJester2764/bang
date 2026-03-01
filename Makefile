@@ -11,9 +11,10 @@ build:
 	$(CC) $(CFLAGS) -c -o data.o data.c
 	$(CC) $(CFLAGS) -c -o efi-local.o efi-local.c
 	$(CC) $(CFLAGS) -c -o con.o con.c
+	$(CC) $(CFLAGS) -c -o fs.o fs.c
 	$(CC) $(CFLAGS) -c -o bang.o bang.c
 	# Link
-	$(CC) $(EFIFLAGS) $(LIBS) -o BOOTX64.EFI bang.o data.o efi-local.o con.o
+	$(CC) $(EFIFLAGS) $(LIBS) -o BOOTX64.EFI bang.o data.o efi-local.o con.o fs.o
 
 image: build
 	dd if=/dev/zero of=fat.img bs=1k count=1440

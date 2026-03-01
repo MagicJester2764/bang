@@ -1,5 +1,6 @@
 #include "con.h"
 #include "efi-local.h"
+#include "fs.h"
 
 EFI_STATUS EFIAPI
 efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
@@ -26,10 +27,10 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systable) {
     // status = BS->GetMemoryMap(&map_size, map, &map_key, &desc_size, &desc_version);
     // if (EFI_ERROR(status)) return status;
 
-    status = con_print(L"[+] Searching for EFI applications...\r\n");
+    status = con_print(L"[+] Searching for kernel...\r\n");
     if (EFI_ERROR(status)) return status;
 
-    status = con_print(L"[+] Found 0 applications.\r\n\r\n");
+    status = fs_find_kernel(image);
     if (EFI_ERROR(status)) return status;
 
     status = con_reset();
