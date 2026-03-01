@@ -1,5 +1,6 @@
 OVMF_PATH=/usr/share/OVMF
 KERNEL=kernel.bin
+QUARK_DIR=../quark
 
 RUST_TARGET=x86_64-unknown-uefi
 RUST_PROFILE=release
@@ -39,4 +40,11 @@ clean:
 	rm -f BOOTX64.EFI fat.img hdimage.bin cdimage.iso
 	cargo clean
 
-.PHONY: build image hd cd run run-iso clean
+# Build quark kernel and drivers, then copy artifacts here
+sync-quark:
+	$(MAKE) -C $(QUARK_DIR) all
+	cp $(QUARK_DIR)/kernel.bin $(KERNEL)
+	mkdir -p drivers
+	cp $(QUARK_DIR)/drivers/vga/vga.drv drivers/
+
+.PHONY: build image hd cd run run-iso clean sync-quark
