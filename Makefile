@@ -14,9 +14,10 @@ build:
 	cargo build --release
 	cp $(EFI_BIN) BOOTX64.EFI
 
-image: build
-	dd if=/dev/zero of=fat.img bs=1k count=1440
-	mformat -i fat.img -f 1440 ::
+image: build $(ROOTFS_IMG)
+	$(eval BOOT_FAT_KB := $(shell expr $(ROOTFS_SIZE_KB) + 3072))
+	dd if=/dev/zero of=fat.img bs=1k count=$(BOOT_FAT_KB)
+	mformat -i fat.img ::
 	mmd -i fat.img ::/EFI
 	mmd -i fat.img ::/EFI/BOOT
 	mcopy -i fat.img BOOTX64.EFI ::/EFI/BOOT
@@ -25,6 +26,7 @@ image: build
 	@if [ -d drivers ] && [ "$$(ls -A drivers 2>/dev/null)" ]; then \
 		for f in drivers/*; do mcopy -i fat.img "$$f" ::/drivers/; done; \
 	fi
+	mcopy -i fat.img $(ROOTFS_IMG) ::/drivers/rootfs.img
 
 $(ROOTFS_IMG): FORCE
 	dd if=/dev/zero of=$(ROOTFS_IMG) bs=1k count=$(ROOTFS_SIZE_KB)
@@ -37,8 +39,9 @@ $(ROOTFS_IMG): FORCE
 		mcopy -i ../$(ROOTFS_IMG) "$$f" "::$$f"; \
 	done
 
-hd: image $(ROOTFS_IMG)
-	mkgpt -o hdimage.bin --image-size 131072 \
+hd: image
+	$(eval HD_SECTORS := $(shell expr '(' $(ROOTFS_SIZE_KB) + 3072 + $(ROOTFS_SIZE_KB) + 2048 ')' '*' 2))
+	mkgpt -o hdimage.bin --image-size $(HD_SECTORS) \
 		--part fat.img --type system \
 		--part $(ROOTFS_IMG) --type linux
 
