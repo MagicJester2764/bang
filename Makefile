@@ -1,24 +1,13 @@
-CC=x86_64-w64-mingw32-gcc
-NASM=nasm
-CFLAGS=-ffreestanding -I$(EFI_PATH)/ -I$(EFI_PATH)/x86_64 -I$(EFI_PATH)/protocol
-EFIFLAGS=-ffreestanding -nostdlib -Wl,-dll -shared -Wl,--subsystem,10 -e efi_main
-LIBS=-L/usr/lib -lefi -lgnuefi
-
-EFI_PATH=/usr/include/efi
 OVMF_PATH=/usr/share/OVMF
 KERNEL=kernel.bin
 
+RUST_TARGET=x86_64-unknown-uefi
+RUST_PROFILE=release
+EFI_BIN=rust/target/$(RUST_TARGET)/$(RUST_PROFILE)/bang.efi
+
 build:
-	# Compile C sources
-	$(CC) $(CFLAGS) -c -o data.o data.c
-	$(CC) $(CFLAGS) -c -o efi-local.o efi-local.c
-	$(CC) $(CFLAGS) -c -o con.o con.c
-	$(CC) $(CFLAGS) -c -o fs.o fs.c
-	$(CC) $(CFLAGS) -c -o bang.o bang.c
-	# Assemble trampoline
-	$(NASM) -f win64 boot.asm -o boot.o
-	# Link
-	$(CC) $(EFIFLAGS) $(LIBS) -o BOOTX64.EFI bang.o data.o efi-local.o con.o fs.o boot.o
+	cd rust && cargo build --release
+	cp $(EFI_BIN) BOOTX64.EFI
 
 image: build
 	dd if=/dev/zero of=fat.img bs=1k count=1440
@@ -43,4 +32,7 @@ run-iso: cd
 	sudo qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -cdrom cdimage.iso
 
 clean:
-	rm -f *.o BOOTX64.EFI fat.img hdimage.bin cdimage.iso
+	rm -f BOOTX64.EFI fat.img hdimage.bin cdimage.iso
+	cd rust && cargo clean
+
+.PHONY: build image hd cd run run-iso clean

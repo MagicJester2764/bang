@@ -1,0 +1,15 @@
+[package]
+name = "bang"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+uefi = { version = "0.36", features = ["alloc", "global_allocator", "logger", "panic_handler"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true

@@ -5,3 +5,4 @@ iso/*
 *.iso
 *.img
 *.EFI
+rust/target/
