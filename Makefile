@@ -60,13 +60,17 @@ clean:
 	rm -f BOOTX64.EFI fat.img $(ROOTFS_IMG) hdimage.bin cdimage.iso
 	cargo clean
 
-# Build quark kernel and drivers, then copy artifacts here
+# Build quark kernel, drivers, and user-space programs, then copy artifacts here
 sync-quark:
 	$(MAKE) -C $(QUARK_DIR) all
 	cp $(QUARK_DIR)/kernel.bin $(KERNEL)
 	mkdir -p drivers
 	cp $(QUARK_DIR)/drivers/vga/vga.drv drivers/
 	cp $(QUARK_DIR)/drivers/fat32/fat32.drv drivers/
+	cp $(QUARK_DIR)/user/init/target/x86_64-unknown-none/release/init drivers/init.elf
+	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello drivers/hello.elf
+	cp $(QUARK_DIR)/user/nameserver/target/x86_64-unknown-none/release/nameserver drivers/nameserver.elf
+	cp $(QUARK_DIR)/user/keyboard/target/x86_64-unknown-none/release/keyboard drivers/keyboard.elf
 
 .PHONY: build image hd cd run run-iso clean sync-quark FORCE
 
