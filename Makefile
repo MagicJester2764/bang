@@ -68,9 +68,10 @@ sync-quark:
 	cp $(QUARK_DIR)/drivers/vga/vga.drv drivers/
 	cp $(QUARK_DIR)/drivers/fat32/fat32.drv drivers/
 	cp $(QUARK_DIR)/user/init/target/x86_64-unknown-none/release/init drivers/init.elf
-	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello drivers/hello.elf
-	cp $(QUARK_DIR)/user/nameserver/target/x86_64-unknown-none/release/nameserver drivers/nameserver.elf
-	cp $(QUARK_DIR)/user/keyboard/target/x86_64-unknown-none/release/keyboard drivers/keyboard.elf
+	mkdir -p $(ROOTFS_DIR)
+	cp $(QUARK_DIR)/user/nameserver/target/x86_64-unknown-none/release/nameserver $(ROOTFS_DIR)/NAMESRVR.ELF
+	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello $(ROOTFS_DIR)/HELLO.ELF
+	cp $(QUARK_DIR)/user/keyboard/target/x86_64-unknown-none/release/keyboard $(ROOTFS_DIR)/KEYBOARD.ELF
 
 .PHONY: build image hd cd run run-iso clean sync-quark FORCE
 
