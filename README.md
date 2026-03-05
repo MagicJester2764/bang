@@ -8,7 +8,7 @@ Bang is a UEFI application that:
 
 1. Loads an ELF kernel (`kernel.bin`) from the boot volume
 2. Loads driver modules from a `\drivers\` directory as Multiboot boot modules
-3. Packages a FAT32 rootfs image as a boot module for the kernel
+3. Packages a small FAT32 boot image (~1 MiB) with user-space ELFs as a boot module
 4. Queries the GOP framebuffer for display info
 5. Exits UEFI boot services and builds a Multiboot1 or Multiboot2 info structure
 6. Hands off to the kernel in either 32-bit protected mode (via a 64-to-32-bit trampoline) or 64-bit long mode
@@ -28,19 +28,22 @@ For 32-bit Multiboot kernels, a trampoline written in GAS intel syntax switches 
   init.elf                 Init process
   vga.drv                  VGA text mode driver
   fat32.drv                FAT32 filesystem driver
-  rootfs.img               FAT32 rootfs (user-space ELFs inside)
+  boot.img                 FAT32 boot image (user-space ELFs inside)
 ```
 
-The rootfs image contains user-space programs as FAT32 8.3 files:
+The boot image (`boot.img`, ~1 MiB FAT32) contains user-space programs as 8.3 files:
 
 ```
-rootfs.img (FAT32)
+boot.img (FAT32)
   NAMESRVR.ELF             Nameserver
   CONSOLE.ELF              Console server
   HELLO.ELF                Hello world test
   KEYBOARD.ELF             PS/2 keyboard driver
   INPUT.ELF                Input server (line discipline)
 ```
+
+The full rootfs (~33 MiB FAT32) is included as the second GPT partition and contains
+the same files under a `boot/` subdirectory for future disk-based access.
 
 ### Source layout
 
@@ -78,9 +81,9 @@ make clean       # Remove all build artifacts
 make sync-quark  # Build and copy kernel + drivers + user programs from ../quark
 ```
 
-### Rootfs
+### Boot image and rootfs
 
-Files placed in the `rootfs/` directory are packaged into a FAT32 image (~33 MiB) and included both as a second GPT partition and as a boot module (so the kernel can access it without a disk driver). The `sync-quark` target populates this directory with the Quark user-space ELFs.
+User-space ELFs in `rootfs/boot/` are packaged into a small `boot.img` (~1 MiB FAT32) that is loaded as a Multiboot boot module. The full `rootfs/` directory is also packaged into `rootfs.img` (~33 MiB FAT32) and included as the second GPT partition. The `sync-quark` target populates `rootfs/boot/` with the Quark user-space ELFs.
 
 ## Running
 
