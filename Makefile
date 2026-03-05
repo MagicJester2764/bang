@@ -72,6 +72,7 @@ sync-quark:
 	cp $(QUARK_DIR)/user/nameserver/target/x86_64-unknown-none/release/nameserver $(ROOTFS_DIR)/NAMESRVR.ELF
 	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello $(ROOTFS_DIR)/HELLO.ELF
 	cp $(QUARK_DIR)/user/keyboard/target/x86_64-unknown-none/release/keyboard $(ROOTFS_DIR)/KEYBOARD.ELF
+	cp $(QUARK_DIR)/user/console/target/x86_64-unknown-none/release/console $(ROOTFS_DIR)/CONSOLE.ELF
 
 .PHONY: build image hd cd run run-iso clean sync-quark FORCE
 
