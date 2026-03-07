@@ -31,19 +31,27 @@ For 32-bit Multiboot kernels, a trampoline written in GAS intel syntax switches 
   boot.img                 FAT32 boot image (user-space ELFs inside)
 ```
 
-The boot image (`boot.img`, ~1 MiB FAT32) contains user-space programs as 8.3 files:
+The boot image (`boot.img`, ~1 MiB FAT32) contains essential user-space services:
 
 ```
 boot.img (FAT32)
   NAMESRVR.ELF             Nameserver
   CONSOLE.ELF              Console server
-  HELLO.ELF                Hello world test
   KEYBOARD.ELF             PS/2 keyboard driver
   INPUT.ELF                Input server (line discipline)
+  DISK.ELF                 ATA PIO disk driver
 ```
 
-The full rootfs (~33 MiB FAT32) is included as the second GPT partition and contains
-the same files under a `boot/` subdirectory for future disk-based access.
+The rootfs (~33 MiB FAT32) is the second GPT partition and contains non-essential
+programs that init loads from disk after booting essential services:
+
+```
+rootfs.img (FAT32)
+  usr/
+    bin/
+      HELLO.ELF            Hello world test
+      DISKTEST.ELF          Disk test program
+```
 
 ### Source layout
 
@@ -83,7 +91,9 @@ make sync-quark  # Build and copy kernel + drivers + user programs from ../quark
 
 ### Boot image and rootfs
 
-User-space ELFs in `rootfs/boot/` are packaged into a small `boot.img` (~1 MiB FAT32) that is loaded as a Multiboot boot module. The full `rootfs/` directory is also packaged into `rootfs.img` (~33 MiB FAT32) and included as the second GPT partition. The `sync-quark` target populates `rootfs/boot/` with the Quark user-space ELFs.
+Essential ELFs in `rootfs/boot/` are packaged into a small `boot.img` (~1 MiB FAT32) that is loaded as a Multiboot boot module. Non-essential programs in `rootfs/usr/bin/` are packaged into `rootfs.img` (~33 MiB FAT32) and included as the second GPT partition. Init loads essential services from boot.img at startup, then reads remaining programs from the disk partition after the disk driver is running.
+
+The `sync-quark` target builds Quark and populates both: essential ELFs to `rootfs/boot/` and non-essential ELFs to `rootfs/usr/bin/`.
 
 ## Running
 
