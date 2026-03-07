@@ -88,8 +88,9 @@ sync-quark:
 	cp $(QUARK_DIR)/user/console/target/x86_64-unknown-none/release/console $(BOOT_DIR)/CONSOLE.ELF
 	cp $(QUARK_DIR)/user/input/target/x86_64-unknown-none/release/input $(BOOT_DIR)/INPUT.ELF
 	cp $(QUARK_DIR)/user/disk/target/x86_64-unknown-none/release/disk $(BOOT_DIR)/DISK.ELF
-	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello $(ROOTFS_DIR)/HELLO.ELF
-	cp $(QUARK_DIR)/user/disktest/target/x86_64-unknown-none/release/disktest $(ROOTFS_DIR)/DISKTEST.ELF
+	mkdir -p $(ROOTFS_DIR)/usr/bin
+	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello $(ROOTFS_DIR)/usr/bin/HELLO.ELF
+	cp $(QUARK_DIR)/user/disktest/target/x86_64-unknown-none/release/disktest $(ROOTFS_DIR)/usr/bin/DISKTEST.ELF
 
 .PHONY: build image hd cd run run-iso clean sync-quark boot FORCE
 
