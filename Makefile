@@ -1,4 +1,5 @@
-OVMF_PATH=/usr/share/OVMF
+#OVMF_PATH=/usr/share/OVMF
+OVMF_PATH=./firmware-redist/ovmf
 KERNEL=kernel.bin
 QUARK_DIR=../quark
 
