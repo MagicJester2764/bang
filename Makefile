@@ -65,7 +65,7 @@ cd: image
 	xorriso -as mkisofs -R -f -e fat.img -no-emul-boot -o cdimage.iso iso
 
 run: hd
-	sudo qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -hda hdimage.bin
+	sudo qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -hda hdimage.bin
 
 run-iso: cd
 	sudo qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -cdrom cdimage.iso
@@ -92,6 +92,10 @@ sync-quark:
 	mkdir -p $(ROOTFS_DIR)/usr/bin
 	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello $(ROOTFS_DIR)/usr/bin/HELLO.ELF
 	cp $(QUARK_DIR)/user/disktest/target/x86_64-unknown-none/release/disktest $(ROOTFS_DIR)/usr/bin/DISKTEST.ELF
+	cp $(QUARK_DIR)/user/shell/target/x86_64-unknown-none/release/shell $(ROOTFS_DIR)/usr/bin/SHELL.ELF
+	cp $(QUARK_DIR)/user/echo/target/x86_64-unknown-none/release/echo $(ROOTFS_DIR)/usr/bin/ECHO.ELF
+	cp $(QUARK_DIR)/user/ls/target/x86_64-unknown-none/release/ls $(ROOTFS_DIR)/usr/bin/LS.ELF
+	cp $(QUARK_DIR)/user/cat/target/x86_64-unknown-none/release/cat $(ROOTFS_DIR)/usr/bin/CAT.ELF
 
 .PHONY: build image hd cd run run-iso clean sync-quark boot FORCE
 
