@@ -66,10 +66,10 @@ cd: image
 	xorriso -as mkisofs -R -f -e fat.img -no-emul-boot -o cdimage.iso iso
 
 run: hd
-	sudo qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -hda hdimage.bin
+	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -hda hdimage.bin
 
 run-iso: cd
-	sudo qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -cdrom cdimage.iso
+	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -cdrom cdimage.iso
 
 clean:
 	rm -f BOOTX64.EFI fat.img $(BOOT_IMG) $(ROOTFS_IMG) hdimage.bin cdimage.iso
