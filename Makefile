@@ -97,6 +97,10 @@ sync-quark:
 	cp $(QUARK_DIR)/user/echo/target/x86_64-unknown-none/release/echo $(ROOTFS_DIR)/usr/bin/ECHO.ELF
 	cp $(QUARK_DIR)/user/ls/target/x86_64-unknown-none/release/ls $(ROOTFS_DIR)/usr/bin/LS.ELF
 	cp $(QUARK_DIR)/user/cat/target/x86_64-unknown-none/release/cat $(ROOTFS_DIR)/usr/bin/CAT.ELF
+	cp $(QUARK_DIR)/user/login/target/x86_64-unknown-none/release/login $(ROOTFS_DIR)/usr/bin/LOGIN.ELF
+	mkdir -p $(ROOTFS_DIR)/etc
+	cp $(QUARK_DIR)/rootfs/etc/passwd $(ROOTFS_DIR)/etc/PASSWD
+	mkdir -p $(ROOTFS_DIR)/home/root
 
 .PHONY: build image hd cd run run-iso clean sync-quark boot FORCE
 
