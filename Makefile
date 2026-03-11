@@ -98,6 +98,7 @@ sync-quark:
 	cp $(QUARK_DIR)/user/ls/target/x86_64-unknown-none/release/ls $(ROOTFS_DIR)/usr/bin/LS.ELF
 	cp $(QUARK_DIR)/user/cat/target/x86_64-unknown-none/release/cat $(ROOTFS_DIR)/usr/bin/CAT.ELF
 	cp $(QUARK_DIR)/user/login/target/x86_64-unknown-none/release/login $(ROOTFS_DIR)/usr/bin/LOGIN.ELF
+	cp $(QUARK_DIR)/user/ps/target/x86_64-unknown-none/release/ps $(ROOTFS_DIR)/usr/bin/PS.ELF
 	mkdir -p $(ROOTFS_DIR)/etc
 	cp $(QUARK_DIR)/rootfs/etc/passwd $(ROOTFS_DIR)/etc/PASSWD
 	mkdir -p $(ROOTFS_DIR)/home/root
