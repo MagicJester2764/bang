@@ -90,6 +90,7 @@ sync-quark:
 	cp $(QUARK_DIR)/user/input/target/x86_64-unknown-none/release/input $(BOOT_DIR)/INPUT.ELF
 	cp $(QUARK_DIR)/user/disk/target/x86_64-unknown-none/release/disk $(BOOT_DIR)/DISK.ELF
 	cp $(QUARK_DIR)/user/vfs/target/x86_64-unknown-none/release/vfs $(BOOT_DIR)/VFS.ELF
+	cp $(QUARK_DIR)/user/net/target/x86_64-unknown-none/release/net $(BOOT_DIR)/NET.ELF
 	mkdir -p $(ROOTFS_DIR)/usr/bin
 	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello $(ROOTFS_DIR)/usr/bin/HELLO.ELF
 	cp $(QUARK_DIR)/user/disktest/target/x86_64-unknown-none/release/disktest $(ROOTFS_DIR)/usr/bin/DISKTEST.ELF
@@ -100,6 +101,7 @@ sync-quark:
 	cp $(QUARK_DIR)/user/login/target/x86_64-unknown-none/release/login $(ROOTFS_DIR)/usr/bin/LOGIN.ELF
 	cp $(QUARK_DIR)/user/ps/target/x86_64-unknown-none/release/ps $(ROOTFS_DIR)/usr/bin/PS.ELF
 	cp $(QUARK_DIR)/user/ipcping/target/x86_64-unknown-none/release/ipcping $(ROOTFS_DIR)/usr/bin/IPCPING.ELF
+	cp $(QUARK_DIR)/user/ping/target/x86_64-unknown-none/release/ping $(ROOTFS_DIR)/usr/bin/PING.ELF
 	mkdir -p $(ROOTFS_DIR)/etc
 	cp $(QUARK_DIR)/rootfs/etc/passwd $(ROOTFS_DIR)/etc/PASSWD
 	mkdir -p $(ROOTFS_DIR)/home/root
