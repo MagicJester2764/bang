@@ -102,6 +102,7 @@ sync-quark:
 	cp $(QUARK_DIR)/user/ps/target/x86_64-unknown-none/release/ps $(ROOTFS_DIR)/usr/bin/PS.ELF
 	cp $(QUARK_DIR)/user/ipcping/target/x86_64-unknown-none/release/ipcping $(ROOTFS_DIR)/usr/bin/IPCPING.ELF
 	cp $(QUARK_DIR)/user/ping/target/x86_64-unknown-none/release/ping $(ROOTFS_DIR)/usr/bin/PING.ELF
+	cp $(QUARK_DIR)/user/httpget/target/x86_64-unknown-none/release/httpget $(ROOTFS_DIR)/usr/bin/HTTPGET.ELF
 	mkdir -p $(ROOTFS_DIR)/etc
 	cp $(QUARK_DIR)/rootfs/etc/passwd $(ROOTFS_DIR)/etc/PASSWD
 	mkdir -p $(ROOTFS_DIR)/home/root
