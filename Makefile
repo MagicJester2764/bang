@@ -54,7 +54,29 @@ $(ROOTFS_IMG): FORCE
 		mcopy -i ../$(ROOTFS_IMG) "$$f" "::$$f"; \
 	done
 
-hd: image
+ROOTFS_EXT2_IMG=rootfs-ext2.img
+
+$(ROOTFS_EXT2_IMG): FORCE
+	dd if=/dev/zero of=$(ROOTFS_EXT2_IMG) bs=1k count=$(ROOTFS_SIZE_KB)
+	mkfs.ext2 -b 1024 -F -q $(ROOTFS_EXT2_IMG)
+	debugfs -w -R "mkdir usr" $(ROOTFS_EXT2_IMG)
+	debugfs -w -R "mkdir usr/bin" $(ROOTFS_EXT2_IMG)
+	debugfs -w -R "mkdir etc" $(ROOTFS_EXT2_IMG)
+	debugfs -w -R "mkdir home" $(ROOTFS_EXT2_IMG)
+	debugfs -w -R "mkdir home/root" $(ROOTFS_EXT2_IMG)
+	@cd $(ROOTFS_DIR) && \
+	find . -type f ! -name '.gitkeep' | while read f; do \
+		target=$$(echo "$$f" | sed 's|^\./||'); \
+		debugfs -w -R "write $$f $$target" ../$(ROOTFS_EXT2_IMG); \
+	done
+
+hd: image $(ROOTFS_EXT2_IMG)
+	$(eval HD_SECTORS := $(shell expr '(' $(ROOTFS_SIZE_KB) + 3072 + $(ROOTFS_SIZE_KB) + 2048 ')' '*' 2))
+	mkgpt -o hdimage.bin --image-size $(HD_SECTORS) \
+		--part fat.img --type system \
+		--part $(ROOTFS_EXT2_IMG) --type linux
+
+hd-fat32: image
 	$(eval HD_SECTORS := $(shell expr '(' $(ROOTFS_SIZE_KB) + 3072 + $(ROOTFS_SIZE_KB) + 2048 ')' '*' 2))
 	mkgpt -o hdimage.bin --image-size $(HD_SECTORS) \
 		--part fat.img --type system \
@@ -68,11 +90,14 @@ cd: image
 run: hd
 	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -hda hdimage.bin
 
+run-fat32: hd-fat32
+	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -hda hdimage.bin
+
 run-iso: cd
 	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -cdrom cdimage.iso
 
 clean:
-	rm -f BOOTX64.EFI fat.img $(BOOT_IMG) $(ROOTFS_IMG) hdimage.bin cdimage.iso
+	rm -f BOOTX64.EFI fat.img $(BOOT_IMG) $(ROOTFS_IMG) $(ROOTFS_EXT2_IMG) hdimage.bin cdimage.iso
 	cargo clean
 
 # Build quark kernel, drivers, and user-space programs, then copy artifacts here
@@ -108,6 +133,6 @@ sync-quark:
 	cp $(QUARK_DIR)/rootfs/etc/passwd $(ROOTFS_DIR)/etc/PASSWD
 	mkdir -p $(ROOTFS_DIR)/home/root
 
-.PHONY: build image hd cd run run-iso clean sync-quark boot FORCE
+.PHONY: build image hd hd-fat32 cd run run-iso run-fat32 clean sync-quark boot FORCE
 
 FORCE:
