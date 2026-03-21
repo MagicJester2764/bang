@@ -66,7 +66,7 @@ $(ROOTFS_EXT2_IMG): FORCE
 	debugfs -w -R "mkdir home/root" $(ROOTFS_EXT2_IMG)
 	@cd $(ROOTFS_DIR) && \
 	find . -type f ! -name '.gitkeep' | while read f; do \
-		target=$$(echo "$$f" | sed 's|^\./||'); \
+		target=$$(echo "$$f" | sed 's|^\./||' | tr '[:upper:]' '[:lower:]' | sed 's/\.elf$$//'); \
 		debugfs -w -R "write $$f $$target" ../$(ROOTFS_EXT2_IMG); \
 	done
 
