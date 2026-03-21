@@ -88,7 +88,7 @@ cd: image
 	xorriso -as mkisofs -R -f -e fat.img -no-emul-boot -o cdimage.iso iso
 
 run: hd
-	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -hda hdimage.bin
+	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -serial stdio -hda hdimage.bin
 
 run-fat32: hd-fat32
 	qemu-system-x86_64 -L $(OVMF_PATH)/ -pflash $(OVMF_PATH)/OVMF_CODE.fd -device rtl8139,netdev=n -netdev user,id=n -hda hdimage.bin
