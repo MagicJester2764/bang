@@ -117,7 +117,7 @@ sync-quark:
 	cp $(QUARK_DIR)/user/vfs/target/x86_64-unknown-none/release/vfs $(BOOT_DIR)/VFS.ELF
 	cp $(QUARK_DIR)/user/net/target/x86_64-unknown-none/release/net $(BOOT_DIR)/NET.ELF
 	mkdir -p $(ROOTFS_DIR)/usr/bin
-	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-none/release/hello $(ROOTFS_DIR)/usr/bin/HELLO.ELF
+	cp $(QUARK_DIR)/user/hello/target/x86_64-unknown-quark/release/hello $(ROOTFS_DIR)/usr/bin/HELLO.ELF
 	cp $(QUARK_DIR)/user/disktest/target/x86_64-unknown-none/release/disktest $(ROOTFS_DIR)/usr/bin/DISKTEST.ELF
 	cp $(QUARK_DIR)/user/shell/target/x86_64-unknown-none/release/shell $(ROOTFS_DIR)/usr/bin/SHELL.ELF
 	cp $(QUARK_DIR)/user/echo/target/x86_64-unknown-none/release/echo $(ROOTFS_DIR)/usr/bin/ECHO.ELF
