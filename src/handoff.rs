@@ -8,6 +8,7 @@
 use core::arch::global_asm;
 
 /// Magic value passed in RDI to identify a Bang direct handoff.
+#[allow(dead_code)] // part of the 64-bit handoff ABI, not consumed by bang itself
 pub const BANG_HANDOFF_MAGIC: u64 = 0x4241_4E47; // "BANG"
 
 global_asm!(

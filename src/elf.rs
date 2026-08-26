@@ -137,13 +137,15 @@ fn detect_multiboot_version(file_buf: &[u8]) -> u32 {
 static mut ALLOC_PAGES: [(u64, usize); 32] = [(0, 0); 32];
 static mut ALLOC_COUNT: usize = 0;
 
-/// Check if the page range [base_page .. base_page + num_pages) is already allocated.
-/// Returns true if fully covered (no allocation needed).
-unsafe fn pages_already_allocated(base_page: u64, num_pages: usize) -> bool {
+/// Check whether a single page has already been allocated by a prior segment.
+unsafe fn page_allocated(page: u64) -> bool {
+    let records = &*ptr::addr_of!(ALLOC_PAGES);
     for i in 0..ALLOC_COUNT {
-        let (alloc_base, alloc_pages) = ALLOC_PAGES[i];
-        let alloc_end = alloc_base + (alloc_pages as u64) * 4096;
-        if base_page >= alloc_base && base_page + (num_pages as u64) * 4096 <= alloc_end {
+        let (alloc_base, alloc_pages) = records[i];
+        if alloc_pages != 0
+            && page >= alloc_base
+            && page < alloc_base + (alloc_pages as u64) * 4096
+        {
             return true;
         }
     }
@@ -153,28 +155,64 @@ unsafe fn pages_already_allocated(base_page: u64, num_pages: usize) -> bool {
 /// Record that pages [base .. base + num_pages * 4096) have been allocated.
 unsafe fn record_allocation(base: u64, num_pages: usize) {
     if ALLOC_COUNT < 32 {
-        ALLOC_PAGES[ALLOC_COUNT] = (base, num_pages);
+        let records = &mut *ptr::addr_of_mut!(ALLOC_PAGES);
+        records[ALLOC_COUNT] = (base, num_pages);
         ALLOC_COUNT += 1;
     }
 }
 
 /// Load a PT_LOAD segment: allocate pages at physical address and copy data.
 /// Handles non-page-aligned paddr and overlapping segments.
-fn load_segment(paddr: u64, memsz: u64, file_buf: &[u8], offset: u64, filesz: u64) {
+///
+/// Returns false if the segment is malformed (extends past the file, or its
+/// extents overflow) — previously the copy ran unchecked and read past the end
+/// of the heap buffer holding the kernel image.
+fn load_segment(paddr: u64, memsz: u64, file_buf: &[u8], offset: u64, filesz: u64) -> bool {
+    if filesz > memsz {
+        return false;
+    }
+    // The file data for this segment must actually be inside the file.
+    match offset.checked_add(filesz) {
+        Some(end) if end <= file_buf.len() as u64 => {}
+        _ => return false,
+    }
+    if paddr.checked_add(memsz).is_none() {
+        return false;
+    }
     let page_base = paddr & !0xFFF;
     let page_offset = (paddr - page_base) as usize;
     let total_size = page_offset as u64 + memsz;
     let num_pages = ((total_size + 4095) / 4096) as usize;
 
     unsafe {
-        if !pages_already_allocated(page_base, num_pages) {
-            boot::allocate_pages(
-                boot::AllocateType::Address(page_base),
-                MemoryType::LOADER_DATA,
-                num_pages,
-            )
-            .expect("Failed to allocate pages for segment");
-            record_allocation(page_base, num_pages);
+        // Allocate only the pages of this segment that no earlier segment has
+        // already claimed. Checking "is the whole range covered by one previous
+        // record" made a segment straddling two records retry the allocation,
+        // which UEFI rejects and .expect() turned into a panic.
+        let mut page = page_base;
+        while page < page_base + (num_pages as u64) * 4096 {
+            if !page_allocated(page) {
+                // Extend the run as far as the next already-allocated page.
+                let mut run = 0usize;
+                while page + (run as u64) * 4096 < page_base + (num_pages as u64) * 4096
+                    && !page_allocated(page + (run as u64) * 4096)
+                {
+                    run += 1;
+                }
+                if boot::allocate_pages(
+                    boot::AllocateType::Address(page),
+                    MemoryType::LOADER_DATA,
+                    run,
+                )
+                .is_err()
+                {
+                    return false;
+                }
+                record_allocation(page, run);
+                page += (run as u64) * 4096;
+            } else {
+                page += 4096;
+            }
         }
 
         let dest = paddr as *mut u8;
@@ -191,6 +229,7 @@ fn load_segment(paddr: u64, memsz: u64, file_buf: &[u8], offset: u64, filesz: u6
             );
         }
     }
+    true
 }
 
 /// Load kernel.bin from the boot volume.
@@ -227,9 +266,13 @@ pub fn load_kernel() -> KernelInfo {
 
     // Read entire file
     let mut file_buf = alloc::vec![0u8; file_size];
-    kernel_file
+    let read_len = kernel_file
         .read(&mut file_buf)
         .expect("Failed to read kernel");
+    assert!(
+        read_len == file_size,
+        "Short read on kernel.bin"
+    );
 
     // Check ELF magic
     assert!(
@@ -272,7 +315,20 @@ pub fn load_kernel() -> KernelInfo {
         let phnum = ehdr.e_phnum as usize;
 
         for i in 0..phnum {
-            let off = phoff + i * core::mem::size_of::<Elf32Phdr>();
+            // Bounds-check before reading: e_phoff/e_phnum come from the file.
+            let off = match i
+                .checked_mul(core::mem::size_of::<Elf32Phdr>())
+                .and_then(|o| phoff.checked_add(o))
+            {
+                Some(o) => o,
+                None => break,
+            };
+            if off
+                .checked_add(core::mem::size_of::<Elf32Phdr>())
+                .is_none_or(|end| end > file_buf.len())
+            {
+                break;
+            }
             let phdr: Elf32Phdr =
                 unsafe { ptr::read_unaligned(file_buf.as_ptr().add(off) as *const Elf32Phdr) };
 
@@ -280,12 +336,15 @@ pub fn load_kernel() -> KernelInfo {
                 continue;
             }
 
-            load_segment(
-                phdr.p_paddr as u64,
-                phdr.p_memsz as u64,
-                &file_buf,
-                phdr.p_offset as u64,
-                phdr.p_filesz as u64,
+            assert!(
+                load_segment(
+                    phdr.p_paddr as u64,
+                    phdr.p_memsz as u64,
+                    &file_buf,
+                    phdr.p_offset as u64,
+                    phdr.p_filesz as u64,
+                ),
+                "Malformed PT_LOAD segment in kernel.bin"
             );
         }
 
@@ -309,7 +368,20 @@ pub fn load_kernel() -> KernelInfo {
         let phnum = ehdr.e_phnum as usize;
 
         for i in 0..phnum {
-            let off = phoff + i * core::mem::size_of::<Elf64Phdr>();
+            // Bounds-check before reading: e_phoff/e_phnum come from the file.
+            let off = match i
+                .checked_mul(core::mem::size_of::<Elf64Phdr>())
+                .and_then(|o| phoff.checked_add(o))
+            {
+                Some(o) => o,
+                None => break,
+            };
+            if off
+                .checked_add(core::mem::size_of::<Elf64Phdr>())
+                .is_none_or(|end| end > file_buf.len())
+            {
+                break;
+            }
             let phdr: Elf64Phdr =
                 unsafe { ptr::read_unaligned(file_buf.as_ptr().add(off) as *const Elf64Phdr) };
 
@@ -317,12 +389,15 @@ pub fn load_kernel() -> KernelInfo {
                 continue;
             }
 
-            load_segment(
-                phdr.p_paddr,
-                phdr.p_memsz,
-                &file_buf,
-                phdr.p_offset,
-                phdr.p_filesz,
+            assert!(
+                load_segment(
+                    phdr.p_paddr,
+                    phdr.p_memsz,
+                    &file_buf,
+                    phdr.p_offset,
+                    phdr.p_filesz,
+                ),
+                "Malformed PT_LOAD segment in kernel.bin"
             );
         }
 

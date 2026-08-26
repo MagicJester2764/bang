@@ -165,7 +165,14 @@ pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned, modules: &[ModuleInfo]
             let m = &modules[i];
             (*mods)[i].mod_start = m.phys_start as u32;
             (*mods)[i].mod_end = (m.phys_start + m.size) as u32;
-            (*mods)[i].string = m.name_ptr;
+            // Multiboot1 fixes these fields at 32 bits, so the narrowing is
+            // mandated by the format rather than accidental. Warn loudly if an
+            // address does not actually fit — a truncated pointer would hand
+            // the kernel a garbage module name.
+            if m.name_ptr > u32::MAX as u64 || m.phys_start + m.size > u32::MAX as u64 {
+                println!("[!] Module above 4 GiB cannot be described by Multiboot1");
+            }
+            (*mods)[i].string = m.name_ptr as u32;
             (*mods)[i].reserved = 0;
         }
         flags |= MB_INFO_MODS;

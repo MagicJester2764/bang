@@ -7,8 +7,12 @@ use uefi::Char16;
 
 /// Information about a loaded boot module.
 pub struct ModuleInfo {
-    /// ASCII name of the module (null-terminated, stored in static buffer).
-    pub name_ptr: u32,
+    /// Address of this module's null-terminated ASCII name in `MOD_NAMES`.
+    ///
+    /// Kept as a full 64-bit address: truncating to u32 silently produced a
+    /// bogus pointer if UEFI happened to load the image above 4 GiB. The
+    /// Multiboot writers narrow it where the tag format demands 32 bits.
+    pub name_ptr: u64,
     /// Physical start address of the module data.
     pub phys_start: u64,
     /// Size in bytes.
@@ -24,9 +28,17 @@ static mut MOD_NAMES_POS: usize = 0;
 ///
 /// # Safety
 /// Must be called before `exit_boot_services`.
-unsafe fn store_name(name: &[Char16]) -> u32 {
+unsafe fn store_name(name: &[Char16]) -> u64 {
+    const CAP: usize = 4096;
     let pos = MOD_NAMES_POS;
     let buf = &raw mut MOD_NAMES;
+
+    // Need room for at least the null terminator. Without this guard, once
+    // MOD_NAMES_POS reached CAP the unconditional terminator write below
+    // indexed one past the end of the buffer and panicked the bootloader.
+    if pos >= CAP {
+        return (*buf).as_ptr().add(CAP - 1) as u64;
+    }
 
     // Convert UCS-2 to ASCII, skipping non-ASCII chars
     let mut written = 0;
@@ -35,7 +47,8 @@ unsafe fn store_name(name: &[Char16]) -> u32 {
         if val == 0 {
             break;
         }
-        if pos + written >= 4095 {
+        // Leave one byte for the terminator.
+        if pos + written >= CAP - 1 {
             break;
         }
         (*buf)[pos + written] = if val < 128 { val as u8 } else { b'?' };
@@ -44,7 +57,7 @@ unsafe fn store_name(name: &[Char16]) -> u32 {
     (*buf)[pos + written] = 0; // null terminator
     MOD_NAMES_POS = pos + written + 1;
 
-    (*buf).as_ptr().add(pos) as u32
+    (*buf).as_ptr().add(pos) as u64
 }
 
 /// Load all files from the `\drivers\` directory on the boot volume.
@@ -95,7 +108,16 @@ pub fn load_modules() -> Vec<ModuleInfo> {
         let entry = match dir.read_entry(&mut entry_buf) {
             Ok(Some(info)) => info,
             Ok(None) => break, // no more entries
-            Err(_) => break,
+            Err(err) => {
+                // A name too long for entry_buf reports BUFFER_TOO_SMALL. That
+                // used to abort the scan, silently dropping every remaining
+                // module; skip just this entry instead.
+                if err.status() == uefi::Status::BUFFER_TOO_SMALL {
+                    println!("[!] Skipping directory entry (name too long)");
+                    continue;
+                }
+                break;
+            }
         };
 
         // Skip '.' and '..' entries, and directories
@@ -130,10 +152,18 @@ pub fn load_modules() -> Vec<ModuleInfo> {
         )
         .expect("Failed to allocate pages for module");
 
-        // Read file contents into allocated pages
-        let buf =
-            unsafe { core::slice::from_raw_parts_mut(phys_addr.as_ptr(), num_pages * 4096) };
-        regular_file.read(buf).expect("Failed to read module file");
+        // Zero the whole allocation first: allocate_pages does not clear it,
+        // so the padding between file_size and the page boundary would
+        // otherwise hand the kernel whatever was previously in that memory.
+        let buf = unsafe {
+            core::ptr::write_bytes(phys_addr.as_ptr(), 0, num_pages * 4096);
+            core::slice::from_raw_parts_mut(phys_addr.as_ptr(), num_pages * 4096)
+        };
+        let read_len = regular_file.read(buf).expect("Failed to read module file");
+        if read_len != file_size {
+            println!("[!] Short read on module ({read_len} of {file_size} bytes), skipping");
+            continue;
+        }
 
         // Store name in static buffer
         let name_ptr = unsafe { store_name(file_name.as_slice_with_nul()) };
