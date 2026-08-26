@@ -22,6 +22,27 @@ use uefi::println;
 
 use elf::BootMode;
 
+/// UCS-2 string length, in u16 units, excluding the terminator.
+///
+/// Nothing references this from Rust. LLVM recognises the `CStr16` scan loops
+/// in the `uefi` crate and rewrites them into a `wcslen` libcall, and on a
+/// freestanding UEFI target there is no libc to satisfy it — compiler_builtins
+/// provides the `mem`/`str` family but not the wide-character ones. Newer
+/// toolchains perform that rewrite where older ones did not, so the symbol has
+/// to exist for the image to link.
+///
+/// # Safety
+/// `s` must point to a NUL-terminated UCS-2 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wcslen(s: *const u16) -> usize {
+    let mut n = 0usize;
+    // SAFETY: caller guarantees a NUL-terminated string.
+    while unsafe { *s.add(n) } != 0 {
+        n += 1;
+    }
+    n
+}
+
 /// Multiboot magic values passed to kernel in EAX.
 const MB1_BOOT_MAGIC: u32 = 0x2BAD_B002;
 const MB2_BOOT_MAGIC: u32 = 0x36D7_6289;
