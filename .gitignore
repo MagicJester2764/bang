@@ -6,3 +6,10 @@ iso/*
 *.EFI
 target/
 drivers/*.drv
+
+# Artifacts copied in by `make sync-quark` from ../quark. These are build
+# outputs of that tree, regenerated on every sync.
+drivers/*.elf
+rootfs/boot/
+rootfs/etc/
+rootfs/usr/
