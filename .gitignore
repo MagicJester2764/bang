@@ -1,15 +1,5 @@
-*.bin
-iso/
-iso/*
-*.iso
-*.img
-*.EFI
 target/
-drivers/*.drv
+BOOTX64.EFI
 
-# Artifacts copied in by `make sync-quark` from ../quark. These are build
-# outputs of that tree, regenerated on every sync.
-drivers/*.elf
-rootfs/boot/
-rootfs/etc/
-rootfs/usr/
+# Firmware blobs that ship alongside the tracked OVMF images.
+*.iso
