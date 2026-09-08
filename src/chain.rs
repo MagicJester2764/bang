@@ -17,15 +17,25 @@ use uefi::boot::{self, LoadImageSource};
 use uefi::proto::device_path::build::{media, DevicePathBuilder};
 use uefi::proto::device_path::DevicePath;
 use uefi::proto::loaded_image::LoadedImage;
-use uefi::{println, CStr16, Status};
+use uefi::{println, CStr16, Handle, Status};
 
 /// Build `<the volume we were loaded from>/<file>`.
 ///
 /// The firmware wants a whole path, from the PCI root down to the file, so the
 /// device half is taken from our own image and only the file node is new.
-fn full_path<'a>(file: &CStr16, buf: &'a mut Vec<u8>) -> Option<&'a DevicePath> {
-    let loaded = boot::open_protocol_exclusive::<LoadedImage>(boot::image_handle()).ok()?;
-    let device = loaded.device()?;
+fn full_path<'a>(
+    device: Option<Handle>,
+    file: &CStr16,
+    buf: &'a mut Vec<u8>,
+) -> Option<&'a DevicePath> {
+    let device = match device {
+        Some(d) => d,
+        None => {
+            let loaded =
+                boot::open_protocol_exclusive::<LoadedImage>(boot::image_handle()).ok()?;
+            loaded.device()?
+        }
+    };
     let device_path = boot::open_protocol_exclusive::<DevicePath>(device).ok()?;
 
     let mut builder = DevicePathBuilder::with_vec(buf);
@@ -41,15 +51,16 @@ fn full_path<'a>(file: &CStr16, buf: &'a mut Vec<u8>) -> Option<&'a DevicePath> 
     builder.finalize().ok()
 }
 
-/// Load and start `file`, which does not return if it succeeds.
+/// Load and start `file` from `device`, or from our own volume if `None`.
+/// Does not return if it succeeds.
 ///
 /// Boot services are still up: the loaded image needs them, and exiting them
 /// is its business rather than ours.
-pub fn boot(file: &CStr16) -> Status {
+pub fn boot(device: Option<Handle>, file: &CStr16) -> Status {
     println!("[+] Chainloading {} ...", file);
 
     let mut buf = Vec::new();
-    let Some(path) = full_path(file, &mut buf) else {
+    let Some(path) = full_path(device, file, &mut buf) else {
         println!("[!] Could not work out a device path for {}", file);
         return Status::NOT_FOUND;
     };

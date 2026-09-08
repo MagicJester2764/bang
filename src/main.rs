@@ -8,6 +8,7 @@ extern crate alloc;
 extern crate uefi;
 
 mod chain;
+mod discover;
 mod config;
 mod console;
 mod elf;
@@ -60,17 +61,42 @@ fn main() -> Status {
     // What there is to boot, and which of it. Without a \bang.cfg this is the
     // single Multiboot2 entry Bang always had, so an image made before there
     // was a config still boots without one.
-    let cfg = config::load().unwrap_or_else(config::Config::builtin);
+    let mut cfg = config::load().unwrap_or_else(config::Config::builtin);
+
+    // What is installed, alongside what was written down. Added after the
+    // config so that a configured entry stays where the user put it, and its
+    // `default` keeps meaning what it meant.
+    if cfg.autodetect {
+        for found in discover::scan() {
+            let already = cfg.entries.iter().any(|e| match &e.target {
+                config::Target::Chainload { path, device } => {
+                    *path == found.path && device.unwrap_or(found.device) == found.device
+                }
+                _ => false,
+            });
+            if already {
+                continue;
+            }
+            cfg.entries.push(config::Entry {
+                title: found.title,
+                target: config::Target::Chainload {
+                    path: found.path,
+                    device: Some(found.device),
+                },
+            });
+        }
+    }
+
     let choice = menu::choose(&cfg);
     let entry = &cfg.entries[choice];
 
     let (kernel_path, modules_path) = match &entry.target {
         config::Target::Multiboot { kernel, modules } => (kernel, modules),
-        config::Target::Chainload { path } => {
+        config::Target::Chainload { path, device } => {
             // Boot services stay up: the image we start needs them, and
             // exiting them is its business rather than ours. If it comes back,
             // so do we — with nothing having been torn down.
-            return chain::boot(path);
+            return chain::boot(*device, path);
         }
         config::Target::Linux { kernel, initrd, cmdline } => {
             // As with a chainload, boot services stay up: the handover

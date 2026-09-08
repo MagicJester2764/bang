@@ -45,7 +45,15 @@ pub enum Target {
     },
     /// Another UEFI application, started as though the firmware had. This is
     /// what boots Windows: `\EFI\Microsoft\Boot\bootmgfw.efi` is one.
-    Chainload { path: CString16 },
+    ///
+    /// `device` is the volume it lives on, and `None` means the one Bang was
+    /// loaded from — which is all a config file can name, since it has no way
+    /// to write down a handle. Anything found by looking around says which
+    /// disk it was found on.
+    Chainload {
+        path: CString16,
+        device: Option<uefi::Handle>,
+    },
     /// A Linux bzImage through the EFI handover protocol.
     Linux {
         kernel: CString16,
@@ -64,6 +72,8 @@ pub struct Config {
     pub timeout: u64,
     pub default: usize,
     pub entries: Vec<Entry>,
+    /// Whether to look around for loaders the config does not name.
+    pub autodetect: bool,
 }
 
 impl Config {
@@ -72,6 +82,7 @@ impl Config {
         Config {
             timeout: 0,
             default: 0,
+            autodetect: true,
             entries: alloc::vec![Entry {
                 title: "Quark".to_string(),
                 target: Target::Multiboot {
@@ -133,7 +144,7 @@ fn path(arg: &str) -> Option<CString16> {
 }
 
 pub fn parse(text: &str) -> Config {
-    let mut cfg = Config { timeout: 5, default: 0, entries: Vec::new() };
+    let mut cfg = Config { timeout: 5, default: 0, entries: Vec::new(), autodetect: true };
     // The default may name an entry declared later, so it is resolved at the
     // end rather than as it is read.
     let mut default_title: Option<String> = None;
@@ -147,6 +158,9 @@ pub fn parse(text: &str) -> Config {
 
         match directive {
             "timeout" => cfg.timeout = arg.parse().unwrap_or(5),
+            // On unless told otherwise: a machine with no config at all should
+            // still offer what is installed on it.
+            "autodetect" => cfg.autodetect = !matches!(arg, "off" | "no" | "false" | "0"),
             "default" => {
                 // A number selects by position, anything else by title.
                 match arg.parse::<usize>() {
@@ -177,7 +191,7 @@ pub fn parse(text: &str) -> Config {
                     },
                     "chainload" => {
                         if let Some(p) = path(arg) {
-                            entry.target = Target::Chainload { path: p };
+                            entry.target = Target::Chainload { path: p, device: None };
                         }
                     }
                     "linux" => {
