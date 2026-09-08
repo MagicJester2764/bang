@@ -60,11 +60,11 @@ unsafe fn store_name(name: &[Char16]) -> u64 {
     (*buf).as_ptr().add(pos) as u64
 }
 
-/// Load all files from the `\drivers\` directory on the boot volume.
+/// Load every file from `dir` on the boot volume as a boot module.
 ///
 /// Must be called before `exit_boot_services` (needs UEFI filesystem access).
 /// Returns a vector of loaded module descriptors.
-pub fn load_modules() -> Vec<ModuleInfo> {
+pub fn load_modules(dir_path: &uefi::CStr16) -> Vec<ModuleInfo> {
     let mut modules = Vec::new();
 
     let mut fs = match boot::get_image_file_system(boot::image_handle()) {
@@ -78,14 +78,10 @@ pub fn load_modules() -> Vec<ModuleInfo> {
     let mut root = fs.open_volume().expect("Failed to open volume");
 
     // Try to open \drivers\ directory
-    let dir_handle = match root.open(
-        cstr16!("\\drivers"),
-        FileMode::Read,
-        FileAttribute::empty(),
-    ) {
+    let dir_handle = match root.open(dir_path, FileMode::Read, FileAttribute::empty()) {
         Ok(handle) => handle,
         Err(_) => {
-            println!("[*] No \\drivers directory found, skipping module loading");
+            println!("[*] No {} directory found, skipping module loading", dir_path);
             return modules;
         }
     };
@@ -93,12 +89,12 @@ pub fn load_modules() -> Vec<ModuleInfo> {
     let mut dir = match dir_handle.into_type().expect("Failed to get file type") {
         FileType::Dir(d) => d,
         FileType::Regular(_) => {
-            println!("[!] \\drivers is not a directory");
+            println!("[!] {} is not a directory", dir_path);
             return modules;
         }
     };
 
-    println!("[+] Scanning \\drivers\\ for modules...");
+    println!("[+] Scanning {} for modules...", dir_path);
 
     // Read directory entries
     // We need a buffer for read_entry — use a generous stack buffer

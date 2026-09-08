@@ -7,10 +7,14 @@ extern crate alloc;
 #[macro_use]
 extern crate uefi;
 
+mod chain;
+mod config;
 mod console;
 mod elf;
 mod gop;
 mod handoff;
+mod linux;
+mod menu;
 mod modules;
 mod multiboot;
 mod trampoline;
@@ -53,16 +57,41 @@ fn main() -> Status {
 
     console::print_banner();
 
+    // What there is to boot, and which of it. Without a \bang.cfg this is the
+    // single Multiboot2 entry Bang always had, so an image made before there
+    // was a config still boots without one.
+    let cfg = config::load().unwrap_or_else(config::Config::builtin);
+    let choice = menu::choose(&cfg);
+    let entry = &cfg.entries[choice];
+
+    let (kernel_path, modules_path) = match &entry.target {
+        config::Target::Multiboot { kernel, modules } => (kernel, modules),
+        config::Target::Chainload { path } => {
+            // Boot services stay up: the image we start needs them, and
+            // exiting them is its business rather than ours. If it comes back,
+            // so do we — with nothing having been torn down.
+            return chain::boot(path);
+        }
+        config::Target::Linux { kernel, initrd, cmdline } => {
+            // As with a chainload, boot services stay up: the handover
+            // protocol has the kernel exit them itself.
+            return linux::boot(kernel, initrd.as_deref(), cmdline);
+        }
+    };
+
     // Load kernel ELF into memory
-    let kernel = elf::load_kernel();
+    let kernel = elf::load_kernel(kernel_path);
 
     println!(
         "[+] Entry: {:#x}, MB version: {}, mode: {:?}",
         kernel.entry_point, kernel.mb_version, kernel.boot_mode
     );
 
-    // Load boot modules from \drivers\ directory (must be before ExitBootServices)
-    let mods = modules::load_modules();
+    // Load boot modules (must be before ExitBootServices)
+    let mods = match modules_path {
+        Some(dir) => modules::load_modules(dir),
+        None => alloc::vec::Vec::new(),
+    };
 
     // Query GOP for framebuffer info (must be before ExitBootServices)
     let fb = if kernel.mb_version == 2 {

@@ -232,9 +232,9 @@ fn load_segment(paddr: u64, memsz: u64, file_buf: &[u8], offset: u64, filesz: u6
     true
 }
 
-/// Load kernel.bin from the boot volume.
-pub fn load_kernel() -> KernelInfo {
-    println!("[+] Loading kernel...");
+/// Load a kernel image from the boot volume.
+pub fn load_kernel(path: &uefi::CStr16) -> KernelInfo {
+    println!("[+] Loading {} ...", path);
 
     // Open boot volume
     let mut fs = boot::get_image_file_system(boot::image_handle())
@@ -243,18 +243,14 @@ pub fn load_kernel() -> KernelInfo {
     let mut root = fs.open_volume().expect("Failed to open volume");
 
     let kernel_handle = root
-        .open(
-            cstr16!("\\kernel.bin"),
-            FileMode::Read,
-            FileAttribute::empty(),
-        )
-        .expect("kernel.bin not found");
+        .open(path, FileMode::Read, FileAttribute::empty())
+        .expect("kernel not found");
 
     let mut kernel_file = kernel_handle
         .into_regular_file()
-        .expect("kernel.bin is not a regular file");
+        .expect("kernel is not a regular file");
 
-    println!("[+] Found kernel.bin.");
+    println!("[+] Found it.");
 
     // Get file size
     let info = kernel_file
