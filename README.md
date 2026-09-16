@@ -36,7 +36,7 @@ The boot image (`boot.img`, ~1 MiB FAT32) contains essential user-space services
 ```
 boot.img (FAT32)
   NAMESRVR.ELF             Nameserver
-  CONSOLE.ELF              Console server (framebuffer, blinking cursor)
+  QTTY.ELF                 Text console (framebuffer, blinking cursor)
   KEYBOARD.ELF             PS/2 keyboard driver
   INPUT.ELF                Input server (line discipline)
   DISK.ELF                 ATA PIO disk driver
@@ -55,7 +55,7 @@ rootfs.img (FAT32)
   usr/
     bin/
       LOGIN.ELF             Multi-user login program
-      SHELL.ELF             Interactive shell (cd, pwd, kill, path resolution)
+      QSH.ELF               Interactive shell (cd, pwd, kill, path resolution)
       ECHO.ELF              Echo arguments to stdout
       LS.ELF                Directory/file listing
       CAT.ELF               File reader
