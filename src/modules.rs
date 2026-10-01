@@ -139,14 +139,25 @@ pub fn load_modules(dir_path: &uefi::CStr16) -> Vec<ModuleInfo> {
             None => continue,
         };
 
-        // Allocate pages for the module
+        // Allocate pages for the module, below four gigabytes. A Multiboot
+        // module tag has thirty-two bits for an address, and the kernel this
+        // most often loads does not look at memory above that either. On a
+        // machine with more, "any pages" is as likely to be above the line
+        // as below it — and a module can be a whole filesystem, a hundred
+        // megabytes or more, which is exactly what the firmware would rather
+        // put up there.
         let num_pages = (file_size + 4095) / 4096;
-        let phys_addr = boot::allocate_pages(
-            boot::AllocateType::AnyPages,
+        let phys_addr = match boot::allocate_pages(
+            boot::AllocateType::MaxAddress(0xFFFF_FFFF),
             MemoryType::LOADER_DATA,
             num_pages,
-        )
-        .expect("Failed to allocate pages for module");
+        ) {
+            Ok(addr) => addr,
+            Err(_) => {
+                println!("[!] No room below 4 GiB for a module of {file_size} bytes, skipping");
+                continue;
+            }
+        };
 
         // Zero the whole allocation first: allocate_pages does not clear it,
         // so the padding between file_size and the page boundary would

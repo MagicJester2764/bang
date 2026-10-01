@@ -51,6 +51,12 @@ the framebuffer mode — has to be read before it does.
 
 ## Things to keep true
 
+- **A module is loaded below four gigabytes.** A Multiboot module tag has
+  thirty-two bits for an address. Asked for "any pages", firmware on a
+  machine with more memory than that is free to answer from above the line,
+  and likes to for something large — and a module can be a whole root
+  filesystem. One there is no room for below the line is skipped and said
+  to be.
 - **Everything read off a volume is untrusted input.** Bang parses the kernel
   image, the configuration and every file in a modules directory, so
   bounds-check program headers and segment copies against the file length
