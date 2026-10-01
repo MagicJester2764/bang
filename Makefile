@@ -2,7 +2,8 @@
 #
 # This builds BOOTX64.EFI and nothing else. Assembling a disk image out of it,
 # and running one, belongs to whatever distro is being built — see ../explosion,
-# which stages this alongside the kernel from ../quark.
+# which stages this alongside the kernel from ../quark and the userland from
+# ../quarkutils.
 #
 # The OVMF firmware lives here because a bootloader is what needs it to exist;
 # ExplOSion's QEMU targets point at this copy by default.

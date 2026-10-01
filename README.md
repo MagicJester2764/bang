@@ -1,123 +1,145 @@
 # Bang
 
-A UEFI bootloader for x86-64 that loads ELF kernels with Multiboot1 and Multiboot2 support.
+A UEFI bootloader for x86-64. It loads ELF kernels by Multiboot1 or
+Multiboot2, boots Linux through the EFI handover protocol, starts any other
+UEFI application, and offers a menu of whatever it was told about and whatever
+it found installed.
+
+It was written to boot [Quark](https://github.com/MagicJester2764/quark), and
+it builds one file: `BOOTX64.EFI`. Putting that file on a disk image, beside a
+kernel, is a distribution's job —
+[ExplOSion](https://github.com/MagicJester2764/explosion) does it for Quark.
 
 ## What it does
 
-Bang is a UEFI application that:
+Bang is an ordinary UEFI application. Started by the firmware, it:
 
-1. Loads an ELF kernel (`kernel.bin`) from the boot volume
-2. Loads driver modules from a `\drivers\` directory as Multiboot boot modules
-3. Packages a small FAT32 boot image (~1 MiB) with user-space ELFs as a boot module
-4. Queries the GOP framebuffer for display info
-5. Exits UEFI boot services and builds a Multiboot1 or Multiboot2 info structure
-6. Hands off to the kernel in either 32-bit protected mode (via a 64-to-32-bit trampoline) or 64-bit long mode
+1. Reads `\bang.cfg` from the volume it was loaded from. Without one it has a
+   single built-in entry, a Multiboot2 kernel at `\kernel.bin`
+2. Looks at every filesystem the firmware can see for other loaders — Windows
+   at the path it always uses, and shim, GRUB, systemd-boot, rEFInd or a
+   fallback `BOOTX64.EFI` in any directory under `\EFI` — and adds what it
+   finds to the list, leaving out itself and anything the configuration
+   already names
+3. Shows a menu: a numbered list and a countdown. Up and down move, a number
+   picks, enter boots, and when the countdown runs out the default goes
+4. Boots the choice, one of three ways
 
-## How it works
+**A Multiboot kernel.** The ELF is parsed and its `PT_LOAD` segments placed;
+every file in the entry's `modules` directory is loaded as a boot module; the
+GOP framebuffer is asked for its mode; boot services are exited; and a
+Multiboot1 or Multiboot2 information structure is built from the final memory
+map, with the modules and the framebuffer in it. A kernel with a Multiboot
+header is entered in 32-bit protected mode, through a trampoline that takes the
+CPU down from long mode; a 64-bit ELF without one is entered directly, in long
+mode.
 
-Bang runs as a standard UEFI application (`BOOTX64.EFI`). It uses UEFI's `SimpleFileSystem` protocol to read the kernel and driver files from the boot FAT partition. After parsing the ELF headers to detect the kernel's Multiboot version and bitness, it allocates physical memory for each PT_LOAD segment, copies the data, and prepares a Multiboot info structure containing the memory map, framebuffer info, and module descriptors.
+**Linux.** A bzImage is loaded by the EFI handover protocol: the setup header
+is copied into a `boot_params` page, the kernel, an initrd and a command line
+are placed, and the entry point the header names is called. Boot services stay
+up, because the kernel exits them itself.
 
-For 32-bit Multiboot kernels, a trampoline written in GAS intel syntax switches from 64-bit long mode down to 32-bit protected mode before jumping to the kernel entry point. For 64-bit kernels, a direct handoff passes control with the Multiboot2 info pointer in RDI.
+**Anything else.** The image is handed back to the firmware and started, by
+device path so that it can find its own files. That is how Windows boots, and
+GRUB, and a UEFI shell. If it returns, so does Bang.
 
-### Boot volume layout
+## Configuration
+
+`\bang.cfg` is lines of `directive argument`; blank lines and `#` comments are
+ignored.
 
 ```
-\EFI\BOOT\BOOTX64.EFI     Bang bootloader
-\kernel.bin                Quark kernel (Multiboot2 ELF)
+timeout 5
+default Quark
+
+entry Quark
+    multiboot \kernel.bin
+    modules   \drivers
+
+entry UEFI Shell
+    chainload \EFI\tools\Shell.efi
+
+entry Fedora
+    linux   \vmlinuz
+    initrd  \initrd.img
+    options root=/dev/sda2 ro
+```
+
+| Directive | |
+|---|---|
+| `timeout N` | Seconds before the default boots. 5 if absent |
+| `default TITLE` | Which entry that is. The first, if absent |
+| `autodetect off` | Offer only what is written here |
+| `entry TITLE` | Starts an entry; the lines after it describe it |
+| `multiboot PATH` | An ELF kernel with a Multiboot header |
+| `modules DIR` | A directory whose files are all loaded as boot modules |
+| `chainload PATH` | A UEFI application to start |
+| `linux PATH`, `initrd PATH`, `options ...` | A bzImage, its initrd and its command line |
+
+A line it does not understand is reported and skipped, not refused: a
+bootloader that will not start because of one bad line in its configuration is
+a bootloader you cannot fix without another one.
+
+## Booting Quark
+
+Quark's kernel carries a Multiboot2 header, so Bang enters it in protected mode
+and the kernel takes itself to long mode. The boot volume ExplOSion assembles
+looks like this:
+
+```
+\EFI\BOOT\BOOTX64.EFI     Bang
+\bang.cfg                 the menu
+\kernel.bin               the Quark kernel
 \drivers\
-  init.elf                 Init process
-  vga.drv                  VGA text mode driver
-  fat32.drv                FAT32 filesystem driver
-  boot.img                 FAT32 boot image (user-space ELFs inside)
+  vga.drv  fat32.drv      modules the kernel loads itself
+  init.elf                the first program
+  boot.img                a small FAT32 image holding the services init starts
 ```
 
-The boot image (`boot.img`, ~1 MiB FAT32) contains essential user-space services:
+Everything in `\drivers` reaches the kernel as a Multiboot module. The kernel
+finds `init` among them by name and starts it; `init` finds `boot.img` and
+starts the rest.
 
-```
-boot.img (FAT32)
-  NAMESRVR.ELF             Nameserver
-  QTTY.ELF                 Text console (framebuffer, blinking cursor)
-  KEYBOARD.ELF             PS/2 keyboard driver
-  INPUT.ELF                Input server (line discipline)
-  DISK.ELF                 ATA PIO disk driver
-  VFS.ELF                  FAT32 filesystem service
-```
-
-The rootfs (~33 MiB FAT32) is the second GPT partition and contains programs
-that init loads from disk via VFS after booting essential services:
-
-```
-rootfs.img (FAT32)
-  etc/
-    PASSWD                  User account database (colon-delimited)
-  home/
-    root/                   Root user home directory
-  usr/
-    bin/
-      LOGIN.ELF             Multi-user login program
-      QSH.ELF               Interactive shell (cd, pwd, kill, path resolution)
-      ECHO.ELF              Echo arguments to stdout
-      LS.ELF                Directory/file listing
-      CAT.ELF               File reader
-      PS.ELF                Task list (TID, state, UID, parent)
-      IPCPING.ELF           IPC latency measurement tool
-      HELLO.ELF             Hello world / heap test
-      DISKTEST.ELF          Disk test program
-```
-
-### Source layout
+## Source layout
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | Entry point, boot flow orchestration |
+| `src/main.rs` | Entry point and boot flow |
+| `src/config.rs` | `\bang.cfg` |
+| `src/discover.rs` | Finding installed loaders on every volume |
+| `src/menu.rs` | The menu |
 | `src/elf.rs` | ELF32/64 parsing, segment loading, Multiboot detection |
-| `src/multiboot.rs` | Multiboot1/2 info structure builders |
-| `src/modules.rs` | Boot module loading from `\drivers\` |
+| `src/modules.rs` | Loading a directory of boot modules |
+| `src/multiboot.rs` | Multiboot1 and Multiboot2 information structures |
 | `src/gop.rs` | GOP framebuffer queries |
-| `src/trampoline.rs` | 64-bit to 32-bit trampoline (global_asm) |
+| `src/trampoline.rs` | Long mode down to 32-bit protected mode |
 | `src/handoff.rs` | 64-bit direct handoff |
+| `src/linux.rs` | The EFI handover protocol |
+| `src/chain.rs` | Starting another UEFI application |
 | `src/console.rs` | Boot banner |
 
 ## Building
 
-### Dependencies
-
-- **Rust nightly** with `x86_64-unknown-uefi` target and `rust-src` component
-- **mtools** (`mformat`, `mmd`, `mcopy`) for FAT image creation
-- **mkgpt** for GPT disk image creation
-- **xorriso** for ISO image creation (optional, for `make cd`)
-- **QEMU** with **OVMF** firmware for testing
-
-### Build commands
+- **Rust nightly**, the one `rust-toolchain.toml` pins, with the
+  `x86_64-unknown-uefi` target and `rust-src`
 
 ```bash
-make build       # Compile the EFI binary
-make image       # Create boot FAT image with kernel and drivers
-make hd          # Create GPT hard disk image (boot + rootfs partitions)
-make cd          # Create bootable ISO image
-make run         # Build HD image and run in QEMU
-make run-iso     # Build ISO and run in QEMU
-make clean       # Remove all build artifacts
-make sync-quark  # Build and copy kernel + drivers + user programs from ../quark
+make build    # BOOTX64.EFI
+make clean
 ```
 
-### Boot image and rootfs
+That is all this repository builds. To make a disk image and boot it, see
+ExplOSion: `make run` there stages Bang, the kernel and the userland,
+assembles a GPT image and starts it in QEMU.
 
-Essential ELFs in `rootfs/boot/` are packaged into a small `boot.img` (~1 MiB FAT32) that is loaded as a Multiboot boot module. The rootfs in `rootfs/` is packaged into `rootfs.img` (~33 MiB FAT32) and included as the second GPT partition. Init loads essential services from boot.img at startup, then starts VFS which serves the rootfs partition. Init loads the login program (or shell as fallback) from `/usr/bin/` via VFS.
+`firmware-redist/ovmf/` holds a copy of the OVMF firmware, because a bootloader
+is what needs it to exist; ExplOSion's QEMU targets use this copy by default.
 
-The `sync-quark` target builds Quark and populates both: essential ELFs to `rootfs/boot/`, programs to `rootfs/usr/bin/`, and system files (`/etc/PASSWD`, `/home/root/`) to the rootfs.
+## Not tested
 
-## Running
-
-```bash
-# Build everything from the quark kernel first
-make sync-quark
-
-# Run in QEMU
-make run
-```
-
-Requires OVMF UEFI firmware. By default uses bundled firmware at `./firmware-redist/ovmf/` (configurable via `OVMF_PATH` in the Makefile).
+Windows. The path it boots by is the standard one and the mechanism is the one
+GRUB and a UEFI shell are started by, but there has been no Windows
+installation to try it on.
 
 ## Disclaimer
 
