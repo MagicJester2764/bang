@@ -1,3 +1,4 @@
+use uefi::boot::{self, AllocateType};
 use uefi::mem::memory_map::{MemoryMap, MemoryMapOwned, MemoryType};
 use uefi::table::cfg::ConfigTableEntry;
 
@@ -73,35 +74,44 @@ pub fn find_rsdp() -> Option<Rsdp> {
 /// Maximum number of modules supported.
 const MAX_MODULES: usize = 32;
 
-/// Static buffer for Multiboot1 info — must survive ExitBootServices.
-static mut MB1_INFO: MultibootInfo = MultibootInfo {
-    flags: 0,
-    mem_lower: 0,
-    mem_upper: 0,
-    boot_device: 0,
-    cmdline: 0,
-    mods_count: 0,
-    mods_addr: 0,
-    syms: [0; 4],
-    mmap_length: 0,
-    mmap_addr: 0,
-};
+/// What the kernel is told is written here: four pages below four
+/// gigabytes, asked for while there is a firmware to ask ([`reserve`]).
+///
+/// It used to be written into this program's own memory, and the kernel
+/// handed its address — which a Multiboot kernel is handed in a register
+/// thirty-two bits wide. Firmware loads a program wherever it has room, and
+/// on a machine with more than four gigabytes that is above them: the
+/// address lost its top half on the way, and the kernel read what it was
+/// told out of memory nothing had written to. It found no memory map, and
+/// so no memory.
+static mut INFO_AT: usize = 0;
+const INFO_PAGES: usize = 4;
+const INFO_SIZE: usize = INFO_PAGES * 4096;
 
-/// Static buffer for Multiboot1 memory map entries.
-static mut MB1_MMAP: [MultibootMmapEntry; 256] = [MultibootMmapEntry {
-    size: 0,
-    base_addr: 0,
-    length: 0,
-    entry_type: 0,
-}; 256];
+/// Where each part of a Multiboot1 structure goes in that memory: the
+/// structure itself, the modules, their names, and the memory map last.
+const MB1_MODULES_AT: usize = 64;
+const MB1_NAMES_AT: usize = MB1_MODULES_AT + MAX_MODULES * core::mem::size_of::<MultibootModule>();
+const MB1_NAME_MAX: usize = 64;
+const MB1_MMAP_AT: usize = MB1_NAMES_AT + MAX_MODULES * MB1_NAME_MAX;
+const MB1_MMAP_MAX: usize = (INFO_SIZE - MB1_MMAP_AT) / core::mem::size_of::<MultibootMmapEntry>();
 
-/// Static buffer for Multiboot2 boot info (8192 bytes, 8-byte aligned).
-#[repr(align(8))]
-struct Mb2Buffer([u8; 8192]);
+/// Set aside the memory a kernel's boot information is written to. False if
+/// the firmware has none below four gigabytes to give, in which case there
+/// is nothing a Multiboot kernel can be told.
+///
+/// Before boot services are exited.
+pub fn reserve() -> bool {
+    match boot::allocate_pages(AllocateType::MaxAddress(0xFFFF_FFFF), MemoryType::LOADER_DATA, INFO_PAGES) {
+        Ok(at) => {
+            unsafe { INFO_AT = at.as_ptr() as usize };
+            true
+        }
+        Err(_) => false,
+    }
+}
 
-static mut MB2_INFO: Mb2Buffer = Mb2Buffer([0u8; 8192]);
-
-/// Static buffer for Multiboot1 module entries (16 bytes each).
+/// Multiboot1 module entries (16 bytes each).
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 struct MultibootModule {
@@ -110,13 +120,6 @@ struct MultibootModule {
     string: u32,
     reserved: u32,
 }
-
-static mut MB1_MODULES: [MultibootModule; MAX_MODULES] = [MultibootModule {
-    mod_start: 0,
-    mod_end: 0,
-    string: 0,
-    reserved: 0,
-}; MAX_MODULES];
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -169,22 +172,22 @@ fn efi_memtype_to_mb(efi_type: MemoryType) -> u32 {
 /// Returns the physical address of the MBI structure.
 ///
 /// # Safety
-/// Must be called after `exit_boot_services` — writes into static buffers.
+/// Must be called after [`reserve`] has succeeded and after
+/// `exit_boot_services` — writes into the memory that set aside.
 pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned, modules: &[ModuleInfo]) -> u32 {
-    let mbi = &raw mut MB1_INFO;
-    let mmap = &raw mut MB1_MMAP;
-    let mods = &raw mut MB1_MODULES;
-
-    // Zero the structures
-    core::ptr::write_bytes(mbi, 0, 1);
-    core::ptr::write_bytes(mmap, 0, 1);
+    let base_at = INFO_AT as *mut u8;
+    core::ptr::write_bytes(base_at, 0, INFO_SIZE);
+    let mbi = base_at as *mut MultibootInfo;
+    let mods = base_at.add(MB1_MODULES_AT) as *mut MultibootModule;
+    let names = base_at.add(MB1_NAMES_AT);
+    let mmap = base_at.add(MB1_MMAP_AT) as *mut MultibootMmapEntry;
 
     let mut mem_lower: u64 = 0;
     let mut mem_upper: u64 = 0;
     let mut mmap_count: usize = 0;
 
     for desc in memory_map.entries() {
-        if mmap_count >= 256 {
+        if mmap_count >= MB1_MMAP_MAX {
             break;
         }
 
@@ -192,11 +195,12 @@ pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned, modules: &[ModuleInfo]
         let length = desc.page_count * 4096;
         let mb_type = efi_memtype_to_mb(desc.ty);
 
-        let ent = &mut (*mmap)[mmap_count];
-        ent.size = (core::mem::size_of::<MultibootMmapEntry>() - 4) as u32;
-        ent.base_addr = base;
-        ent.length = length;
-        ent.entry_type = mb_type;
+        mmap.add(mmap_count).write_unaligned(MultibootMmapEntry {
+            size: (core::mem::size_of::<MultibootMmapEntry>() - 4) as u32,
+            base_addr: base,
+            length,
+            entry_type: mb_type,
+        });
         mmap_count += 1;
 
         if mb_type == 1 {
@@ -219,32 +223,41 @@ pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned, modules: &[ModuleInfo]
     if mod_count > 0 {
         for i in 0..mod_count {
             let m = &modules[i];
-            (*mods)[i].mod_start = m.phys_start as u32;
-            (*mods)[i].mod_end = (m.phys_start + m.size) as u32;
-            // Multiboot1 fixes these fields at 32 bits, so the narrowing is
-            // mandated by the format rather than accidental. Warn loudly if an
-            // address does not actually fit — a truncated pointer would hand
-            // the kernel a garbage module name.
-            if m.name_ptr > u32::MAX as u64 || m.phys_start + m.size > u32::MAX as u64 {
-                println!("[!] Module above 4 GiB cannot be described by Multiboot1");
+            // A module's name is kept in this program's own memory, which
+            // may be above four gigabytes; the kernel is handed a copy that
+            // is not.
+            let name = names.add(i * MB1_NAME_MAX);
+            let from = m.name_ptr as *const u8;
+            let mut len = 0;
+            while len < MB1_NAME_MAX - 1 && *from.add(len) != 0 {
+                *name.add(len) = *from.add(len);
+                len += 1;
             }
-            (*mods)[i].string = m.name_ptr as u32;
-            (*mods)[i].reserved = 0;
+            // Multiboot1 fixes these fields at 32 bits, so the narrowing is
+            // mandated by the format rather than accidental; a module is
+            // loaded below four gigabytes for that reason (`modules.rs`).
+            mods.add(i).write_unaligned(MultibootModule {
+                mod_start: m.phys_start as u32,
+                mod_end: (m.phys_start + m.size) as u32,
+                string: name as u32,
+                reserved: 0,
+            });
         }
         flags |= MB_INFO_MODS;
     }
 
-    (*mbi).flags = flags;
-    (*mbi).mem_lower = mem_lower as u32;
-    (*mbi).mem_upper = mem_upper as u32;
-    (*mbi).mods_count = mod_count as u32;
-    (*mbi).mods_addr = if mod_count > 0 {
-        (*mods).as_ptr() as u32
-    } else {
-        0
-    };
-    (*mbi).mmap_length = (mmap_count * core::mem::size_of::<MultibootMmapEntry>()) as u32;
-    (*mbi).mmap_addr = (*mmap).as_ptr() as u32;
+    mbi.write_unaligned(MultibootInfo {
+        flags,
+        mem_lower: mem_lower as u32,
+        mem_upper: mem_upper as u32,
+        boot_device: 0,
+        cmdline: 0,
+        mods_count: mod_count as u32,
+        mods_addr: if mod_count > 0 { mods as u32 } else { 0 },
+        syms: [0; 4],
+        mmap_length: (mmap_count * core::mem::size_of::<MultibootMmapEntry>()) as u32,
+        mmap_addr: mmap as u32,
+    });
 
     mbi as u32
 }
@@ -253,16 +266,16 @@ pub unsafe fn build_mb1_info(memory_map: &MemoryMapOwned, modules: &[ModuleInfo]
 /// Returns the physical address of the MB2 info buffer.
 ///
 /// # Safety
-/// Must be called after `exit_boot_services` — writes into static buffers.
+/// Must be called after [`reserve`] has succeeded and after
+/// `exit_boot_services` — writes into the memory that set aside.
 pub unsafe fn build_mb2_info(
     memory_map: &MemoryMapOwned,
     fb: Option<&FbInfo>,
     modules: &[ModuleInfo],
     rsdp: Option<&Rsdp>,
 ) -> u32 {
-    let buf = &raw mut MB2_INFO;
-    let out = (*buf).0.as_mut_ptr();
-    let buf_size = 8192usize;
+    let out = INFO_AT as *mut u8;
+    let buf_size = INFO_SIZE;
 
     core::ptr::write_bytes(out, 0, buf_size);
 

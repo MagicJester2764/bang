@@ -57,6 +57,16 @@ the framebuffer mode — has to be read before it does.
   and likes to for something large — and a module can be a whole root
   filesystem. One there is no room for below the line is skipped and said
   to be.
+- **So is what the kernel is told.** The boot information — the memory
+  map, the modules, the framebuffer, the ACPI pointer — is written into
+  pages asked for below four gigabytes (`multiboot::reserve`), before boot
+  services are exited, and not into a buffer of Bang's own: a Multiboot
+  kernel is handed the address in a register thirty-two bits wide, and
+  firmware loads Bang itself wherever it has room. On a machine with more
+  than four gigabytes that was above them; the address lost its top half,
+  and the kernel found no memory map where it pointed and so no memory.
+  Nothing that address reaches may live in Bang's image: a module's name is
+  copied, not pointed at.
 - **The kernel is told where the ACPI tables are.** A Multiboot2 kernel is
   handed a copy of the firmware's root pointer (tag 15, or 14 for the first
   revision's), read out of the configuration table before boot services are

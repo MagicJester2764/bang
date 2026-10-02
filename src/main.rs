@@ -4,7 +4,6 @@
 
 extern crate alloc;
 
-#[macro_use]
 extern crate uefi;
 
 mod chain;
@@ -133,6 +132,13 @@ fn main() -> Status {
     } else {
         None
     };
+
+    // Somewhere below four gigabytes to tell the kernel what it is told
+    // (must be before ExitBootServices: it is the firmware's to give).
+    if !multiboot::reserve() {
+        println!("[!] No memory below 4 GiB for the kernel's boot information");
+        return Status::OUT_OF_RESOURCES;
+    }
 
     println!("[+] Exiting boot services...");
 
