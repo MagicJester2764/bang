@@ -1,4 +1,5 @@
 use uefi::mem::memory_map::{MemoryMap, MemoryMapOwned, MemoryType};
+use uefi::table::cfg::ConfigTableEntry;
 
 use crate::gop::FbInfo;
 use crate::modules::ModuleInfo;
@@ -13,6 +14,61 @@ const MB2_TAG_TYPE_END: u32 = 0;
 const MB2_TAG_TYPE_MODULE: u32 = 3;
 const MB2_TAG_TYPE_MMAP: u32 = 6;
 const MB2_TAG_TYPE_FRAMEBUFFER: u32 = 8;
+const MB2_TAG_TYPE_ACPI_OLD: u32 = 14;
+const MB2_TAG_TYPE_ACPI_NEW: u32 = 15;
+
+/// The ACPI root pointer, as the firmware has it: twenty bytes of the first
+/// revision, thirty-six of the second.
+const RSDP_V1: usize = 20;
+const RSDP_V2: usize = 36;
+
+/// A copy of the firmware's ACPI root pointer, taken while there was a
+/// firmware to ask.
+///
+/// On a machine started by UEFI this is the only way a kernel learns where
+/// the ACPI tables are: the pointer is in the firmware's configuration
+/// table and nowhere a kernel could look for it afterwards. (A BIOS leaves
+/// it in memory to be searched for; UEFI does not have to.) Without it a
+/// kernel does not know how many processors there are.
+#[derive(Clone, Copy)]
+pub struct Rsdp {
+    bytes: [u8; RSDP_V2],
+    len: usize,
+}
+
+/// Find the ACPI root pointer: the second revision's if the firmware has
+/// one, the first's if not.
+///
+/// Before boot services are exited. What the table says about itself is not
+/// believed further than its signature and its length: checking it is the
+/// kernel's, which is who will follow it.
+pub fn find_rsdp() -> Option<Rsdp> {
+    let at = uefi::system::with_config_table(|entries| {
+        let find = |guid| entries.iter().find(|e| e.guid == guid).map(|e| e.address as *const u8);
+        find(ConfigTableEntry::ACPI2_GUID).or_else(|| find(ConfigTableEntry::ACPI_GUID))
+    })?;
+    if at.is_null() {
+        return None;
+    }
+    // SAFETY: the firmware published this address as an RSDP, which is at
+    // least twenty bytes; the rest is read only if those bytes say it is
+    // there.
+    unsafe {
+        if core::slice::from_raw_parts(at, 8) != b"RSD PTR " {
+            return None;
+        }
+        let revision = *at.add(15);
+        let len = if revision >= 2 {
+            let said = core::ptr::read_unaligned(at.add(20) as *const u32) as usize;
+            if said < RSDP_V2 { RSDP_V1 } else { RSDP_V2 }
+        } else {
+            RSDP_V1
+        };
+        let mut bytes = [0u8; RSDP_V2];
+        core::ptr::copy_nonoverlapping(at, bytes.as_mut_ptr(), len);
+        Some(Rsdp { bytes, len })
+    }
+}
 
 /// Maximum number of modules supported.
 const MAX_MODULES: usize = 32;
@@ -202,6 +258,7 @@ pub unsafe fn build_mb2_info(
     memory_map: &MemoryMapOwned,
     fb: Option<&FbInfo>,
     modules: &[ModuleInfo],
+    rsdp: Option<&Rsdp>,
 ) -> u32 {
     let buf = &raw mut MB2_INFO;
     let out = (*buf).0.as_mut_ptr();
@@ -300,6 +357,20 @@ pub unsafe fn build_mb2_info(
 
         // Align to 8 bytes
         pos = (pos + 7) & !7;
+    }
+
+    // The ACPI root pointer (type 15 for the second revision's, 14 for the
+    // first's): a copy of the structure itself, as the specification has it.
+    if let Some(rsdp) = rsdp {
+        let tag_size = 8 + rsdp.len;
+        if pos + tag_size + 8 <= buf_size {
+            let kind = if rsdp.len == RSDP_V2 { MB2_TAG_TYPE_ACPI_NEW } else { MB2_TAG_TYPE_ACPI_OLD };
+            write_u32(out, pos, kind);
+            write_u32(out, pos + 4, tag_size as u32);
+            core::ptr::copy_nonoverlapping(rsdp.bytes.as_ptr(), out.add(pos + 8), rsdp.len);
+            pos += tag_size;
+            pos = (pos + 7) & !7;
+        }
     }
 
     // Terminating tag (type=0, size=8)

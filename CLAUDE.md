@@ -57,6 +57,12 @@ the framebuffer mode — has to be read before it does.
   and likes to for something large — and a module can be a whole root
   filesystem. One there is no room for below the line is skipped and said
   to be.
+- **The kernel is told where the ACPI tables are.** A Multiboot2 kernel is
+  handed a copy of the firmware's root pointer (tag 15, or 14 for the first
+  revision's), read out of the configuration table before boot services are
+  exited. Under UEFI nothing else says where the tables are, and without
+  them a kernel sees one processor. Bang copies the pointer and checks only
+  its signature and length; following it is the kernel's.
 - **Everything read off a volume is untrusted input.** Bang parses the kernel
   image, the configuration and every file in a modules directory, so
   bounds-check program headers and segment copies against the file length

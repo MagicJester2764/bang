@@ -126,6 +126,14 @@ fn main() -> Status {
         None
     };
 
+    // Where the ACPI tables are, which only the firmware can say (must be
+    // before ExitBootServices).
+    let rsdp = if kernel.mb_version == 2 {
+        multiboot::find_rsdp()
+    } else {
+        None
+    };
+
     println!("[+] Exiting boot services...");
 
     // Exit boot services — the uefi crate handles the retry internally
@@ -138,8 +146,9 @@ fn main() -> Status {
                 let addr = unsafe { multiboot::build_mb1_info(&memory_map, &mods) };
                 (addr, MB1_BOOT_MAGIC)
             } else {
-                let addr =
-                    unsafe { multiboot::build_mb2_info(&memory_map, fb.as_ref(), &mods) };
+                let addr = unsafe {
+                    multiboot::build_mb2_info(&memory_map, fb.as_ref(), &mods, rsdp.as_ref())
+                };
                 (addr, MB2_BOOT_MAGIC)
             };
 
@@ -154,7 +163,9 @@ fn main() -> Status {
         BootMode::Long64 => {
             // 64-bit direct handoff — pass MB2 info if available, otherwise 0
             let boot_info_ptr = if kernel.mb_version == 2 {
-                unsafe { multiboot::build_mb2_info(&memory_map, fb.as_ref(), &mods) as u64 }
+                unsafe {
+                    multiboot::build_mb2_info(&memory_map, fb.as_ref(), &mods, rsdp.as_ref()) as u64
+                }
             } else {
                 0u64
             };
