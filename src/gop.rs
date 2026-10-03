@@ -21,12 +21,21 @@ pub struct FbInfo {
 
 /// Query GOP for framebuffer information.
 /// Must be called before ExitBootServices.
+///
+/// A display with no framebuffer to give — one the firmware can only copy
+/// pictures to (`PixelBltOnly`), as OVMF's virtio GPU is — is no
+/// framebuffer: the kernel starts without one, and the system's own driver
+/// for the display draws. Asked for one, the uefi crate panics.
 pub fn query_gop() -> Option<FbInfo> {
     let handle = boot::get_handle_for_protocol::<GraphicsOutput>().ok()?;
     let mut gop = boot::open_protocol_exclusive::<GraphicsOutput>(handle).ok()?;
 
     let mode = gop.current_mode_info();
     let (width, height) = mode.resolution();
+    if mode.pixel_format() == PixelFormat::BltOnly {
+        println!("[+] GOP: {}x{}, with no framebuffer; the system's display driver will draw", width, height);
+        return None;
+    }
     let fb_base = gop.frame_buffer().as_mut_ptr() as u64;
 
     let (bpp, fb_type, red_pos, red_size, green_pos, green_size, blue_pos, blue_size) =
